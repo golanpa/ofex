@@ -21,7 +21,7 @@ class HostInfo(object):
         return 'mac={}, in_port={}, installed={}'.format(self.eth_addr, self.in_port, self.rule_installed)
 
 
-class Tutorial(object):
+class LearningSwitch(object):
     """
     A Tutorial object is created for each switch that connects.
     A Connection object for that switch is passed to the __init__ function.
@@ -171,7 +171,7 @@ def launch():
     """
     def start_switch(event):
         log.debug("Controlling %s" % (event.connection,))
-        Tutorial(event.connection)
+        LearningSwitch(event.connection)
 
     core.openflow.addListenerByName("ConnectionUp", start_switch)
 
