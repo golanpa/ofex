@@ -21,7 +21,7 @@ class HostInfo(object):
         return 'mac={}, in_port={}, installed={}'.format(self.eth_addr, self.in_port, self.rule_installed)
 
 
-class LearningSwitch(object):
+class Tutorial(object):
     """
     A Tutorial object is created for each switch that connects.
     A Connection object for that switch is passed to the __init__ function.
@@ -87,8 +87,8 @@ class LearningSwitch(object):
 
         dpid = self.connection.dpid
 
-        # log.debug('act_like_switch: dpid={}, type={}, {}.{} -> {}'
-        #           .format(dpid, packet.type, packet.src, packet_in.in_port, packet.dst))
+        log.debug('act_like_switch: dpid={}, type={}, {}.{} -> {}'
+                  .format(dpid, packet.type, packet.src, packet_in.in_port, packet.dst))
 
         # check if we already know this src
         host_info = self.mac_to_host.get(packet.src, None)
@@ -125,18 +125,17 @@ class LearningSwitch(object):
                       .format(dpid, packet.type, packet.src, packet_in.in_port, packet.dst, of.OFPP_FLOOD))
             self.send_packet(packet_in.buffer_id, packet_in.data, of.OFPP_FLOOD, packet_in.in_port)
 
-        # log.debug('act_like_switch: finished: dpid={}'.format(dpid))
+        log.debug('act_like_switch: finished: dpid={}'.format(dpid))
 
     def _install_flow(self, dpid, packet, packet_in, dst_port):
-        """
-        Installing rule in switch. Rule is from any source to specific destination via dst_port
-        """
+        """ Installing rule in switch. Rule is from any source to specific destination via dst_port """
 
-        log.debug('Installing flow: dpid={}, {} -> {} output via port {}'
-                  .format(dpid, "ff:ff:ff:ff:ff:ff", packet.dst, dst_port))
+        log.debug('Installing flow: dpid={}, match={{ dst:{}, in_port:{} }} output via port {}'
+                  .format(dpid, packet.dst, packet_in.in_port, dst_port))
 
         msg = of.ofp_flow_mod()
         msg.match.dl_dst = packet.dst
+        msg.match.in_port = packet_in.in_port
         msg.actions.append(of.ofp_action_output(port=dst_port))
 
         if packet_in.buffer_id != of.NO_BUFFER and packet_in.buffer_id is not None:
@@ -152,9 +151,7 @@ class LearningSwitch(object):
         log.debug('Sending: dpid={}, {}.{} -> {}.{}'.format(dpid, packet.src, packet_in.in_port, packet.dst, dst_port))
 
     def _uninstall_flow(self, dpid, packet, old_port):
-        """
-        Un-installing previous rule.
-        """
+        """ Un-installing previous rule. """
 
         log.debug('Un-installing flow: dpid={}, {} -> {} output via port {}'
                   .format(dpid, "ff:ff:ff:ff:ff:ff", packet.src, old_port))
@@ -171,7 +168,7 @@ def launch():
     """
     def start_switch(event):
         log.debug("Controlling %s" % (event.connection,))
-        LearningSwitch(event.connection)
+        Tutorial(event.connection)
 
     core.openflow.addListenerByName("ConnectionUp", start_switch)
 

@@ -7,6 +7,8 @@ This code is based on the official OpenFlow tutorial code.
 
 from pox.core import core
 import pox.openflow.libopenflow_01 as of
+import utils
+
 
 log = core.getLogger()
 
@@ -21,7 +23,7 @@ class HostInfo(object):
         return 'mac={}, in_port={}, installed={}'.format(self.eth_addr, self.in_port, self.rule_installed)
 
 
-class LearningSwitch(object):
+class Tutorial(object):
     """
     A Tutorial object is created for each switch that connects.
     A Connection object for that switch is passed to the __init__ function.
@@ -128,9 +130,7 @@ class LearningSwitch(object):
         # log.debug('act_like_switch: finished: dpid={}'.format(dpid))
 
     def _install_flow(self, dpid, packet, packet_in, dst_port):
-        """
-        Installing rule in switch. Rule is from any source to specific destination via dst_port
-        """
+        """ Installing rule in switch. Rule is from any source to specific destination via dst_port """
 
         log.debug('Installing flow: dpid={}, {} -> {} output via port {}'
                   .format(dpid, "ff:ff:ff:ff:ff:ff", packet.dst, dst_port))
@@ -152,9 +152,7 @@ class LearningSwitch(object):
         log.debug('Sending: dpid={}, {}.{} -> {}.{}'.format(dpid, packet.src, packet_in.in_port, packet.dst, dst_port))
 
     def _uninstall_flow(self, dpid, packet, old_port):
-        """
-        Un-installing previous rule.
-        """
+        """ Un-installing previous rule. """
 
         log.debug('Un-installing flow: dpid={}, {} -> {} output via port {}'
                   .format(dpid, "ff:ff:ff:ff:ff:ff", packet.src, old_port))
@@ -165,14 +163,35 @@ class LearningSwitch(object):
         self.connection.send(msg)
 
 
+class Discovery(object):
+    __metaclass__ = utils.SingletonType
+
+    def _handle_ConnectionUp(self, event):
+        """ Will be called when a switch is added. """
+        pass
+
+    def handle_ConnectionDown(self, event):
+        """ Will be called when a switch goes down. """
+        pass
+
+    def _handle_PortStatus(self, event):
+        """ Will be called when a link changes. """
+        pass
+
+    def _handle_PacketIn(self, event):
+        """ Will be called when a packet is sent to the controller. """
+        pass
+
+
 def launch():
     """
     Starts the component
     """
     def start_switch(event):
         log.debug("Controlling %s" % (event.connection,))
-        LearningSwitch(event.connection)
+        Tutorial(event.connection)
 
+    core.register('discovery', Discovery())
     core.openflow.addListenerByName("ConnectionUp", start_switch)
 
 
