@@ -5,6 +5,7 @@ in IDC Herzliya.
 
 import threading
 
+
 class UnionFind:
     """ This class implements the operations on the disjoint-set data structure.
     The operations are performed on any Python object, by adding two additional
@@ -48,6 +49,7 @@ class UnionFind:
         else:
             x.uf_parent = UnionFind.find(x.uf_parent)
             return x.uf_parent
+
 
 class SingletonType(type):
     """ A singleton metaclass """
@@ -98,7 +100,8 @@ class Graph:
     
     def remove_node(self, label):
         self.nodes.pop(label, None)
-        
+
+
 class Timer:
     def __init__(self, interval, function, args = [], recurring = False):
         self.interval = interval
@@ -111,7 +114,7 @@ class Timer:
     
     def __do_func__(self):
         self.func(*self.args)
-        if (self.recurring and self.active):
+        if self.recurring and self.active:
             self.start()
     
     def start(self):
@@ -120,7 +123,7 @@ class Timer:
         self.timer.start()
     
     def stop(self):
-        if (self.timer is not None):
+        if self.timer is not None:
             self.timer.cancel()
         self.active = False
     
