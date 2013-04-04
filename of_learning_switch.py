@@ -11,16 +11,6 @@ import pox.openflow.libopenflow_01 as of
 log = core.getLogger()
 
 
-class HostInfo(object):
-    def __init__(self, eth_addr, in_port=-1):
-        self.eth_addr = eth_addr
-        self.in_port = in_port
-        self.rule_installed = False
-
-    def __str__(self):
-        return 'mac={}, in_port={}, installed={}'.format(self.eth_addr, self.in_port, self.rule_installed)
-
-
 class Tutorial(object):
     """
     A Tutorial object is created for each switch that connects.
@@ -28,7 +18,7 @@ class Tutorial(object):
     """
     def __init__(self, connection):
         self.connection = connection
-        self.mac_to_host = dict()
+        self.mac_to_in_port = dict()
 
         # This binds our PacketIn event listener
         connection.addListeners(self)
@@ -81,8 +71,8 @@ class Tutorial(object):
 
     def act_like_switch(self, packet, packet_in):
         """
-        Implement switch-like behavior -- if destination is know - send only to the learnt port, otherwise, send all
-        packets to all ports besides the input port.
+        Implement switch-like behavior -- if destination is know, send only to the learnt port, otherwise, flood (send
+        all packets to all ports besides the input port).
         """
 
         dpid = self.connection.dpid
@@ -91,34 +81,27 @@ class Tutorial(object):
                   .format(dpid, packet.type, packet.src, packet_in.in_port, packet.dst))
 
         # check if we already know this src
-        host_info = self.mac_to_host.get(packet.src, None)
-        if host_info:
+        known_in_port = self.mac_to_in_port.get(packet.src, None)
+        if known_in_port:
             # check whether src incoming port was changed
-            if host_info.in_port != packet_in.in_port:
-                log.info('src in_port was changed: dpid={}, info={}, new in_port={}'
-                         .format(dpid, host_info, packet_in.in_port))
+            if known_in_port != packet_in.in_port:
+                log.info('src in_port was changed: dpid={}, src={} known in_port={}, new in_port={}'
+                         .format(dpid, packet.src, known_in_port, packet_in.in_port))
 
-                if host_info.rule_installed:
-                    self._uninstall_flow(dpid, packet, host_info.in_port)
-                    host_info.rule_installed = False
+                self._uninstall_flows(dpid, packet, known_in_port)
 
                 log.debug('Learning: dpid={}, {} via port {}'.format(dpid, packet.src, packet_in.in_port))
-                host_info.in_port = packet_in.in_port
+                self.mac_to_in_port[packet.src] = packet_in.in_port
         else:
             # new src.in_port - learn it
             log.debug('Learning: dpid={}, {} via port {}'.format(dpid, packet.src, packet_in.in_port))
-            self.mac_to_host[packet.src] = HostInfo(packet.src, packet_in.in_port)
+            self.mac_to_in_port[packet.src] = packet_in.in_port
 
         # check if we know in which port the destination is connected to
-        dst_host_info = self.mac_to_host.get(packet.dst, None)
-        if dst_host_info:
+        known_in_port = self.mac_to_in_port.get(packet.dst, None)
+        if known_in_port:
             # install new rule: dst via in_port
-            self._install_flow(dpid, packet, packet_in, dst_port=dst_host_info.in_port)
-            dst_host_info.rule_installed = True
-
-            # log.info('Sending: dpid={}, type={}, {}.{} -> {}.{}'
-            #          .format(dpid, packet.type, packet.src, packet_in.in_port, packet.dst, dst_host_info.in_port))
-            # self.send_packet(packet_in.buffer_id, packet_in.data, dst_host_info.in_port, packet_in.in_port)
+            self._install_flow(dpid, packet, packet_in, dst_port=known_in_port)
         else:
             # we do not know in which port destination is connected if at all
             log.debug('Broadcasting dpid={}, type={}, {}.{} -> {}.{}'
@@ -128,7 +111,7 @@ class Tutorial(object):
         log.debug('act_like_switch: finished: dpid={}'.format(dpid))
 
     def _install_flow(self, dpid, packet, packet_in, dst_port):
-        """ Installing rule in switch. Rule is from any source to specific destination via dst_port """
+        """ Installing rule in switch. Rule is from any source to specific destination and src_port via dst_port """
 
         log.debug('Installing flow: dpid={}, match={{ dst:{}, in_port:{} }} output via port {}'
                   .format(dpid, packet.dst, packet_in.in_port, dst_port))
@@ -138,6 +121,7 @@ class Tutorial(object):
         msg.match.in_port = packet_in.in_port
         msg.actions.append(of.ofp_action_output(port=dst_port))
 
+        # also send the packet...
         if packet_in.buffer_id != of.NO_BUFFER and packet_in.buffer_id is not None:
             # We got a buffer ID from the switch; use that
             msg.buffer_id = packet_in.buffer_id
@@ -150,8 +134,8 @@ class Tutorial(object):
 
         log.debug('Sending: dpid={}, {}.{} -> {}.{}'.format(dpid, packet.src, packet_in.in_port, packet.dst, dst_port))
 
-    def _uninstall_flow(self, dpid, packet, old_port):
-        """ Un-installing previous rule. """
+    def _uninstall_flows(self, dpid, packet, old_port):
+        """ Un-installing all rules to specific destination. """
 
         log.debug('Un-installing flow: dpid={}, {} -> {} output via port {}'
                   .format(dpid, "ff:ff:ff:ff:ff:ff", packet.src, old_port))
@@ -175,3 +159,7 @@ def launch():
 
 # log.info('sending to: {0}'.format(str(dstHostInfo)))
 # self.send_packet(packet_in.buffer_id, packet_in.data, dstHostInfo.in_port, packet_in.in_port)
+
+# log.info('Sending: dpid={}, type={}, {}.{} -> {}.{}'
+#          .format(dpid, packet.type, packet.src, packet_in.in_port, packet.dst, dst_host_info.in_port))
+# self.send_packet(packet_in.buffer_id, packet_in.data, dst_host_info.in_port, packet_in.in_port)
