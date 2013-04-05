@@ -159,8 +159,6 @@ class LLDPSender(object):
 
     def __init__(self, send_cycle_time=1):
         """
-        Initialize an LLDP packet sender
-
         send_cycle_time is the time (in seconds) that this sender will take to
           send all discovery packets.  Thus, it should be the link timeout
           interval at most.
@@ -302,7 +300,7 @@ class Discovery(object):
         core.listen_to_dependencies(self, listen_args={'openflow': {'priority': 0xffffffff}})
 
         # TODO: removed for debug - need to uncomment next line
-        # utils.Timer(Discovery.LINK_TIMEOUT_CHECK_INTERVAL, self._delete_expired_links, recurring=True)
+        # utils.Timer(Discovery.LINK_TIMEOUT_CHECK_INTERVAL, self._remove_expired_links, recurring=True)
 
     def _handle_openflow_ConnectionUp(self, event):
         """ Will be called when a switch is added. """
@@ -371,7 +369,7 @@ class Discovery(object):
         for link in links:
             del self._adjacency[link]
 
-    def _delete_expired_links(self):
+    def _remove_expired_links(self):
         """ Remove apparently dead links """
         now = time.time()
 
