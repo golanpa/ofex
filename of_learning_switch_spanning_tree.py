@@ -84,7 +84,7 @@ class Tutorial(object):
         dpid = self.connection.dpid
 
         log.debug('act_like_switch: dpid={}, type={}, {}.{} -> {}'
-        .format(dpid, packet.type, packet.src, packet_in.in_port, packet.dst))
+                  .format(dpid, packet.type, packet.src, packet_in.in_port, packet.dst))
 
         # check if we already know this src
         known_in_port = self.mac_to_in_port.get(packet.src, None)
@@ -92,7 +92,7 @@ class Tutorial(object):
             # check whether src incoming port was changed
             if known_in_port != packet_in.in_port:
                 log.info('src in_port was changed: dpid={}, src={} known in_port={}, new in_port={}'
-                .format(dpid, packet.src, known_in_port, packet_in.in_port))
+                         .format(dpid, packet.src, known_in_port, packet_in.in_port))
 
                 self._uninstall_flows(dpid, packet, known_in_port)
 
@@ -120,7 +120,7 @@ class Tutorial(object):
         """ Installing rule in switch. Rule is from any source to specific destination and src_port via dst_port """
 
         log.debug('Installing flow: dpid={}, match={{ dst:{}, in_port:{} }} output via port {}'
-        .format(dpid, packet.dst, packet_in.in_port, dst_port))
+                  .format(dpid, packet.dst, packet_in.in_port, dst_port))
 
         msg = of.ofp_flow_mod()
         msg.match.dl_dst = packet.dst
@@ -144,7 +144,7 @@ class Tutorial(object):
         """ Un-installing all rules to specific destination. """
 
         log.debug('Un-installing flow: dpid={}, {} -> {} output via port {}'
-        .format(dpid, "ff:ff:ff:ff:ff:ff", packet.src, old_port))
+                  .format(dpid, "ff:ff:ff:ff:ff:ff", packet.src, old_port))
 
         msg = of.ofp_flow_mod(command=of.OFPFC_DELETE)
         msg.match.dl_dst = packet.src
