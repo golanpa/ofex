@@ -378,7 +378,7 @@ class Discovery(object):
         expired = [link for link, timestamp in self._adjacency.iteritems() if timestamp + Discovery.LINK_TIMEOUT < now]
         if expired:
             for link in expired:
-                log.debug('_expire_links-> removing link due to timeout: {}.{} -> {}.{}'
+                log.debug('_delete_expired_links-> removing link due to timeout: {}.{} -> {}.{}'
                           .format(link.dpid1, link.port1, link.dpid2, link.port2))
 
             self._delete_links(expired)
