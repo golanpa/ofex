@@ -344,14 +344,14 @@ class Discovery(object):
                         .format(event.dpid, event.port))
             return EventHalt
 
-        # add/update link time
+        # add link or update link time stamp
         link = Discovery.Link(r_dpid, r_port, event.dpid, event.port)
+
         if link not in self._discovered_links:
-            self._discovered_links[link] = time.time()
             log.info('link detected: {}.{} -> {}.{}'.format(link.dpid1, link.port1, link.dpid2, link.port2))
-        else:
-            # Just update timestamp
-            self._discovered_links[link] = time.time()
+
+        # in any case, update the time stamp
+        self._discovered_links[link] = time.time()
 
         # do not pass LLDP packet to switch
         return EventHalt
