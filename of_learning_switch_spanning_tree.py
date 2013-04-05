@@ -336,9 +336,11 @@ class Discovery(object):
         """ Will be called when a packet is sent to the controller. """
         lldp_pkt = event.parsed
 
+        # we handle only LLDP packets
         if lldp_pkt.effective_ethertype != pkt.ethernet.LLDP_TYPE or lldp_pkt.dst != pkt.ETHERNET.LLDP_MULTICAST:
             return EventContinue
 
+        # parse LLDP packet: extract sender dpid and sender port
         lldp_p = lldp_pkt.payload
         ch_id = lldp_p.tlvs[0]
         po_id = lldp_p.tlvs[1]
