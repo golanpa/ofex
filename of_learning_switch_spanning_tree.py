@@ -5,8 +5,8 @@ in IDC Herzliya.
 This code is based on the official OpenFlow tutorial code.
 """
 
+from collections import namedtuple, defaultdict
 import pox.openflow.libopenflow_01 as of
-from collections import namedtuple
 import pox.lib.packet as pkt
 from random import shuffle
 from pox.core import core
@@ -278,6 +278,68 @@ class LLDPSender(object):
         po = of.ofp_packet_out(action=of.ofp_action_output(port=port_num))
         po.data = eth.pack()
         return po.pack()
+
+
+class PortAuthorizer(object):
+    def __init__(self):
+        self._edges = None
+
+    def topology_changed(self, active_links):
+        pass
+
+    def _spanning_tree_from_topology(self, active_links):
+        # v is a set of switches and e is adjacency matrix of the form dpid1->(dpid2, port) which means that
+        # dpid1 is connected to dpid2 via port which is located in dpid1.
+        v, e = self._graph_from_topology(active_links)
+
+    def _edges_from_topology(self, active_links):
+        def get_opposite_link(link):
+            return Discovery.Link(link[2], link[3], link[0], link[1])
+
+        edges = defaultdict(lambda: defaultdict(lambda: []))
+        switches = set()
+
+        # build edges from all discovered links
+        for link in active_links:
+            edges[link.dpid1][link.dpid2].append(link)
+            switches.update([link.dpid1, link.dpid2])
+
+        # remove links which are not valid in both directions. we need only valid full duplex links so our Tutorial
+        # object will learn source of packets correctly
+        for s1 in switches:
+            for s2 in switches:
+                # ignoring same switch
+                if s1 is s2:
+                    continue
+
+                #check if s1 is connected to s2
+                if s2 not in edges[s1]:
+                    continue
+
+                # if two switches are connected via several ports, we select only one of them.
+                # if we already chose one, there is no need to continue.
+                if not isinstance(edges[s1][s2], list):
+                    continue
+
+                # filter non full duplex links - links that are active in both directions
+                is_opposite_link_valid = False
+                for link in edges[s1][s2]:
+                    # check that the link [s2][s1] is active
+                    if get_opposite_link(link) in active_links:
+                        # if two switches are connected via several ports, select only one of them
+                        edges[s1][s2] = link.port1
+                        edges[s2][s1] = link.port2
+                        is_opposite_link_valid = True
+                        break
+
+                # remove links which are only valid for one direction
+                if not is_opposite_link_valid:
+                    del edges[s1][s2]
+                    if s1 in edges[s2]:
+                        # delete the other way too
+                        del edges[s2][s1]
+
+        return switches, edges
 
 
 EventContinue = (False, False)
