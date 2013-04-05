@@ -384,6 +384,7 @@ class Discovery(object):
                 log.debug('_expire_links-> removing link due to timeout: {}.{} -> {}.{}'
                           .format(link.dpid1, link.port1, link.dpid2, link.port2))
 
+
             self._delete_links(expired)
 
 
