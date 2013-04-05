@@ -153,7 +153,7 @@ class Tutorial(object):
 
 
 class LLDPSender(object):
-    """ Sends out discovery packets """
+    """ Sends out LLDP discovery packets """
 
     SendItem = namedtuple("LLDPSenderItem", ('dpid', 'port_num', 'packet'))
 
@@ -164,10 +164,6 @@ class LLDPSender(object):
         send_cycle_time is the time (in seconds) that this sender will take to
           send all discovery packets.  Thus, it should be the link timeout
           interval at most.
-
-        ttl is the time (in seconds) for which a receiving LLDP agent should
-          consider the rest of the data to be valid.  We don't use this, but
-          other LLDP agents might.  Can't be 0 (this means revoke).
         """
         # Packets remaining to be sent in this cycle
         self._this_cycle = list()
@@ -181,34 +177,34 @@ class LLDPSender(object):
         # register for switch events
         core.listen_to_dependencies(self)
 
-    def _handle_openflow_PortStatus(self, event):
-        """ Track changes to switch ports """
-        if event.added or (event.modified and event.ofp.desc.config == 0):
-            self.add_port(event.dpid, event.port, event.ofp.desc.hw_addr)
-        elif event.deleted or (event.modified and event.ofp.desc.config == 1):
-            self.del_port(event.dpid, event.port)
-
     def _handle_openflow_ConnectionUp(self, event):
-        self.del_switch(event.dpid, set_timer=False)
+        self._remove_switch(event.dpid, set_timer=False)
 
         ports = [(port.port_no, port.hw_addr) for port in event.ofp.ports]
 
         for port_num, port_addr in ports:
-            self.add_port(event.dpid, port_num, port_addr, set_timer=False)
+            self._add_port(event.dpid, port_num, port_addr, set_timer=False)
 
         self._set_timer()
 
     def _handle_openflow_ConnectionDown(self, event):
-        self.del_switch(event.dpid)
+        self._remove_switch(event.dpid)
 
-    def del_switch(self, dpid, set_timer=True):
+    def _handle_openflow_PortStatus(self, event):
+        """ Track changes to switch ports """
+        if event.added or (event.modified and event.ofp.desc.config == 0):
+            self._add_port(event.dpid, event.port, event.ofp.desc.hw_addr)
+        elif event.deleted or (event.modified and event.ofp.desc.config == 1):
+            self._remove_port(event.dpid, event.port)
+
+    def _remove_switch(self, dpid, set_timer=True):
         self._this_cycle = [p for p in self._this_cycle if p.dpid != dpid]
         self._next_cycle = [p for p in self._next_cycle if p.dpid != dpid]
 
         if set_timer:
             self._set_timer()
 
-    def del_port(self, dpid, port_num, set_timer=True):
+    def _remove_port(self, dpid, port_num, set_timer=True):
         if port_num > of.OFPP_MAX:
             return
 
@@ -220,13 +216,13 @@ class LLDPSender(object):
         if set_timer:
             self._set_timer()
 
-    def add_port(self, dpid, port_num, port_addr, set_timer=True):
+    def _add_port(self, dpid, port_num, port_addr, set_timer=True):
         if port_num > of.OFPP_MAX:
             return
 
-        self.del_port(dpid, port_num, set_timer=False)
+        self._remove_port(dpid, port_num, set_timer=False)
 
-        lldpPacket = self.create_lldp_packet(dpid, port_num, port_addr)
+        lldpPacket = self._create_lldp_packet(dpid, port_num, port_addr)
         self._next_cycle.append(LLDPSender.SendItem(dpid, port_num, lldpPacket))
 
         if set_timer:
@@ -261,7 +257,7 @@ class LLDPSender(object):
             self._next_cycle.append(item)
             core.openflow.sendToDPID(item.dpid, item.packet)
 
-    def create_lldp_packet(self, dpid, port_num, port_addr):
+    def _create_lldp_packet(self, dpid, port_num, port_addr):
         """ Build discovery packet """
 
         chassis_id = pkt.chassis_id(subtype=pkt.chassis_id.SUB_CHASSIS, id=str(dpid))
