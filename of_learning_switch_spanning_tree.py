@@ -5,12 +5,12 @@ in IDC Herzliya.
 This code is based on the official OpenFlow tutorial code.
 """
 
+from utils import SingletonType, Timer, UnionFind
 from collections import namedtuple, defaultdict
 import pox.openflow.libopenflow_01 as of
 import pox.lib.packet as pkt
 from random import shuffle
 from pox.core import core
-import utils
 import time
 
 
@@ -232,10 +232,10 @@ class LLDPSender(object):
 
         self._timer = None
         num_packets = len(self._this_cycle) + len(self._next_cycle)
+        per_packet_interval = self._send_cycle_time / float(num_packets)
 
         if num_packets != 0:
-            self._timer = utils.Timer(self._send_cycle_time / float(num_packets),
-                                      self._timer_handler, recurring=True)
+            self._timer = Timer(per_packet_interval, self._timer_handler, recurring=True)
 
     def _timer_handler(self):
         """
@@ -281,22 +281,31 @@ class LLDPSender(object):
 
 
 class PortAuthorizer(object):
-    def __init__(self):
-        self._edges = None
+    Vertex = namedtuple("Vertex", ('label', ))
 
-    def topology_changed(self, active_links):
+    def __init__(self):
         pass
 
-    def _spanning_tree_from_topology(self, active_links):
-        # v is a set of switches and e is adjacency matrix of the form dpid1->(dpid2, port) which means that
-        # dpid1 is connected to dpid2 via port which is located in dpid1.
-        v, e = self._graph_from_topology(active_links)
+    def topology_changed(self, active_links):
+        spt = self._spanning_tree_from_topology(active_links)
 
-    def _edges_from_topology(self, active_links):
+    def _spanning_tree_from_topology(self, active_links):
+        # v is a set of switches and e is adjacency matrix of the form: src_switch->(dst_switch->port_on_src) which
+        # means that src_switch is connected to dst_switch via port_on_src which is located in src_switch.
+        G = self._graph_from_topology(active_links)
+
+        # build spanning tree from topology graph
+        spt = self._spt_from_graph(G)
+
+        return spt
+
+    def _graph_from_topology(self, active_links):
         def get_opposite_link(link):
             return Discovery.Link(link[2], link[3], link[0], link[1])
 
-        edges = defaultdict(lambda: defaultdict(lambda: []))
+        # edges is adjacency matrix of the form: src_switch->(dst_switch->port_on_src) which
+        # means that src_switch is connected to dst_switch via port_on_src which is located in src_switch.
+        edges = defaultdict(lambda: defaultdict(lambda: list))
         switches = set()
 
         # build edges from all discovered links
@@ -306,48 +315,75 @@ class PortAuthorizer(object):
 
         # remove links which are not valid in both directions. we need only valid full duplex links so our Tutorial
         # object will learn source of packets correctly
-        for s1 in switches:
-            for s2 in switches:
+        for src_switch in switches:
+            for dst_switch in switches:
                 # ignoring same switch
-                if s1 is s2:
+                if src_switch is dst_switch:
                     continue
 
-                #check if s1 is connected to s2
-                if s2 not in edges[s1]:
+                #check if src_switch is connected to dst_switch
+                if dst_switch not in edges[src_switch]:
                     continue
 
                 # if two switches are connected via several ports, we select only one of them.
                 # if we already chose one, there is no need to continue.
-                if not isinstance(edges[s1][s2], list):
+                if not isinstance(edges[src_switch][dst_switch], list):
                     continue
 
                 # filter non full duplex links - links that are active in both directions
                 is_opposite_link_valid = False
-                for link in edges[s1][s2]:
-                    # check that the link [s2][s1] is active
+                for link in edges[src_switch][dst_switch]:
+                    # check that the link [dst_switch][src_switch] is active
                     if get_opposite_link(link) in active_links:
                         # if two switches are connected via several ports, select only one of them
-                        edges[s1][s2] = link.port1
-                        edges[s2][s1] = link.port2
+                        edges[src_switch][dst_switch] = link.port1
+                        edges[dst_switch][src_switch] = link.port2
                         is_opposite_link_valid = True
                         break
 
                 # remove links which are only valid for one direction
                 if not is_opposite_link_valid:
-                    del edges[s1][s2]
-                    if s1 in edges[s2]:
-                        # delete the other way too
-                        del edges[s2][s1]
+                    del edges[src_switch][dst_switch]
+                    if src_switch in edges[dst_switch]:
+                        # also delete the opposite link
+                        del edges[dst_switch][src_switch]
 
         return switches, edges
 
+    def _spt_from_graph(self, G):
+        V, E = G
+
+        #map: src_switch->set of (dst_switch, port_num) tuple
+        spt = defaultdict(set)
+
+        # map: dpid->set(Vertex(v))
+        vertex_map = {v: UnionFind.make_set(PortAuthorizer.Vertex(v)) for v in V}
+
+        if len(vertex_map.keys()) > 0:
+            for src_switch, e in E.iteritems():
+                dst_switch, port = e
+
+                # get the sets where the switches are in
+                src_switch_set = vertex_map[src_switch]
+                dst_switch_set = vertex_map[dst_switch]
+
+                # check that the edge does not connect two switches of the same set
+                if UnionFind.find(src_switch_set) != UnionFind.find(dst_switch_set):
+                    # edge connects disjoint sets - unite the sets
+                    UnionFind.union(src_switch_set, dst_switch)
+
+                    # update spt with both direction edges
+                    spt[src_switch].add((dst_switch, port))
+                    spt[dst_switch].add((src_switch, E[dst_switch][src_switch]))
+
+        return spt
 
 EventContinue = (False, False)
 EventHalt = (True, False)
 
 
 class Discovery(object):
-    __metaclass__ = utils.SingletonType
+    __metaclass__ = SingletonType
 
     LINK_TIMEOUT = 6                 # number of second before link is considered as invalid
     LINK_TIMEOUT_CHECK_INTERVAL = 3  # number of seconds till the next invalid link check is performed
@@ -357,12 +393,13 @@ class Discovery(object):
     def __init__(self):
         self._discovered_links = dict()  # maps from discovered link to time stamp
         self._sender = LLDPSender()
+        self._port_authorizer = PortAuthorizer()
 
         # listen to events with high priorit so we get them before all others
         core.listen_to_dependencies(self, listen_args={'openflow': {'priority': 0xffffffff}})
 
         # TODO: removed for debug - need to uncomment next line
-        # utils.Timer(Discovery.LINK_TIMEOUT_CHECK_INTERVAL, self._remove_expired_links, recurring=True)
+        # Timer(Discovery.LINK_TIMEOUT_CHECK_INTERVAL, self._remove_expired_links, recurring=True)
 
     def _handle_openflow_ConnectionUp(self, event):
         """ Will be called when a switch is added. """
@@ -412,8 +449,12 @@ class Discovery(object):
         if link not in self._discovered_links:
             log.info('link detected: {}.{} -> {}.{}'.format(link.dpid1, link.port1, link.dpid2, link.port2))
 
-        # in any case, update the time stamp
-        self._discovered_links[link] = time.time()
+            self._discovered_links[link] = time.time()
+            # update ports on switches
+            self._port_authorizer.topology_changed(self._discovered_links.keys())
+        else:
+            # in any case, update the time stamp
+            self._discovered_links[link] = time.time()
 
         # do not pass LLDP packet to switch
         return EventHalt
@@ -421,6 +462,9 @@ class Discovery(object):
     def _remove_links(self, links):
         for link in links:
             del self._discovered_links[link]
+
+        # update ports on switches
+        self._port_authorizer.topology_changed(self._discovered_links.keys())
 
     def _remove_expired_links(self):
         """ Remove apparently dead links """
