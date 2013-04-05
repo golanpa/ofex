@@ -380,7 +380,7 @@ class PortAuthorizer(object):
                 # check that the edge does not connect two switches of the same set
                 if UnionFind.find(src_switch_set) != UnionFind.find(dst_switch_set):
                     # edge connects disjoint sets - unite the sets
-                    UnionFind.union(src_switch_set, dst_switch)
+                    UnionFind.union(src_switch_set, dst_switch_set)
 
                     # update spt with both direction edges
                     spt[src_switch].add((dst_switch, port))
