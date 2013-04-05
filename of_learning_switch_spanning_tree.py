@@ -5,10 +5,13 @@ in IDC Herzliya.
 This code is based on the official OpenFlow tutorial code.
 """
 
-from pox.core import core
 import pox.openflow.libopenflow_01 as of
+from collections import namedtuple
 import pox.lib.packet as pkt
+from random import shuffle
+from pox.core import core
 import utils
+import time
 
 
 log = core.getLogger()
@@ -149,13 +152,6 @@ class Tutorial(object):
         self.connection.send(msg)
 
 
-from collections import namedtuple
-from random import shuffle
-from utils import Timer
-from pox.lib.revent import *
-import time
-
-
 class LLDPSender(object):
     """ Sends out discovery packets """
 
@@ -244,8 +240,8 @@ class LLDPSender(object):
         num_packets = len(self._this_cycle) + len(self._next_cycle)
 
         if num_packets != 0:
-            self._timer = Timer(self._send_cycle_time / float(num_packets),
-                                self._timer_handler, recurring=True)
+            self._timer = utils.Timer(self._send_cycle_time / float(num_packets),
+                                      self._timer_handler, recurring=True)
 
     def _timer_handler(self):
         """
@@ -290,6 +286,10 @@ class LLDPSender(object):
         return po.pack()
 
 
+EventContinue = (False, False)
+EventHalt = (True, False)
+
+
 class Discovery(object):
     __metaclass__ = utils.SingletonType
 
@@ -307,7 +307,7 @@ class Discovery(object):
         core.listen_to_dependencies(self, listen_args={'openflow': {'priority': 0xffffffff}})
 
         # TODO: removed for debug - need to uncomment next line
-        # Timer(self._timeout_check_period, self._expire_links, recurring=True)
+        # utils.Timer(self._timeout_check_period, self._expire_links, recurring=True)
 
     def _handle_openflow_ConnectionUp(self, event):
         """ Will be called when a switch is added. """
@@ -384,14 +384,12 @@ class Discovery(object):
                 log.debug('_expire_links-> removing link due to timeout: {}.{} -> {}.{}'
                           .format(link.dpid1, link.port1, link.dpid2, link.port2))
 
-
             self._delete_links(expired)
 
 
 def launch():
-    """
-    Starts the component
-    """
+    """ Starts the component """
+
     def start_switch(event):
         log.debug("Controlling %s" % (event.connection,))
         Tutorial(event.connection)
@@ -400,7 +398,3 @@ def launch():
     # core.registerNew(Discovery)
     # TODO: removed for debug
     #core.openflow.addListenerByName("ConnectionUp", start_switch)
-
-
-# log.info('sending to: {0}'.format(str(dstHostInfo)))
-# self.send_packet(packet_in.buffer_id, packet_in.data, dstHostInfo.in_port, packet_in.in_port)
