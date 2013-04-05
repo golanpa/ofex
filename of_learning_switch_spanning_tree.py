@@ -362,7 +362,12 @@ class PortAuthorizer(object):
         spt = defaultdict(set)
 
         # map: dpid->set(Vertex(v))
-        vertex_map = {v: UnionFind.make_set(PortAuthorizer.Vertex(v)) for v in V}
+        V = [PortAuthorizer.Vertex(v) for v in V]
+
+        # starting with each switch(vertex) in it own set
+        [UnionFind.make_set(v) for v in V]
+
+        vertex_map = {v.label: v for v in V}
 
         if len(vertex_map.keys()) > 0:
             for src_switch, e in E.iteritems():
