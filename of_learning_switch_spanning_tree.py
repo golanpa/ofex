@@ -287,16 +287,16 @@ EventHalt = (True, False)
 class Discovery(object):
     __metaclass__ = utils.SingletonType
 
-    LINK_TIMEOUT = 6                 # How long until we consider a link dead
-    LINK_TIMEOUT_CHECK_INTERVAL = 3  # How often to check for timeouts
+    LINK_TIMEOUT = 6                 # number of second before link is considered as invalid
+    LINK_TIMEOUT_CHECK_INTERVAL = 3  # number of seconds till the next invalid link check is performed
 
     Link = namedtuple("Link", ("dpid1", "port1", "dpid2", "port2"))
 
     def __init__(self):
-        self._discovered_links = dict()  # map from discovered link to time stamp
+        self._discovered_links = dict()  # maps from discovered link to time stamp
         self._sender = LLDPSender()
 
-        # Listen with a high priority so we get PacketIns as soon as possible
+        # listen to events with high priorit so we get them before all others
         core.listen_to_dependencies(self, listen_args={'openflow': {'priority': 0xffffffff}})
 
         # TODO: removed for debug - need to uncomment next line
@@ -307,7 +307,7 @@ class Discovery(object):
         log.debug('_handle_openflow_ConnectionUp-> Installing flow: route LLDP messages to controller: dpid={}, {}'
                   .format(event.dpid, str(event)))
 
-        # Make sure we get LLDP traffic
+        # make sure LLDP packets are sent to the controller so we can handle it
         match = of.ofp_match(dl_type=pkt.ethernet.LLDP_TYPE, dl_dst=pkt.ETHERNET.LLDP_MULTICAST)
         msg = of.ofp_flow_mod()
         msg.priority = 65000
