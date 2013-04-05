@@ -153,7 +153,7 @@ class Tutorial(object):
 
 
 class LLDPSender(object):
-    """ Sends out LLDP discovery packets """
+    """ Sends out LLDP discovery packets to all switch neighbours """
 
     SendItem = namedtuple("LLDPSenderItem", ('dpid', 'port_num', 'packet'))
 
@@ -293,7 +293,7 @@ class Discovery(object):
     Link = namedtuple("Link", ("dpid1", "port1", "dpid2", "port2"))
 
     def __init__(self):
-        self._adjacency = dict()  # From Link to time.time() stamp
+        self._discovered_links = dict()  # map from discovered link to time stamp
         self._sender = LLDPSender()
 
         # Listen with a high priority so we get PacketIns as soon as possible
@@ -319,7 +319,7 @@ class Discovery(object):
     def _handle_openflow_ConnectionDown(self, event):
         """ Will be called when a switch goes down. """
         # Delete all links on this switch
-        self._delete_links([link for link in self._adjacency if link.dpid1 == event.dpid or link.dpid2 == event.dpid])
+        self._delete_links([link for link in self._discovered_links if event.dpid in [link.dpid1, link.dpid2]])
 
     def _handle_openflow_PacketIn(self, event):
         """ Will be called when a packet is sent to the controller. """
@@ -346,25 +346,25 @@ class Discovery(object):
 
         # add/update link time
         link = Discovery.Link(r_dpid, r_port, event.dpid, event.port)
-        if link not in self._adjacency:
-            self._adjacency[link] = time.time()
+        if link not in self._discovered_links:
+            self._discovered_links[link] = time.time()
             log.info('link detected: {}.{} -> {}.{}'.format(link.dpid1, link.port1, link.dpid2, link.port2))
         else:
             # Just update timestamp
-            self._adjacency[link] = time.time()
+            self._discovered_links[link] = time.time()
 
         # do not pass LLDP packet to switch
         return EventHalt
 
     def _delete_links(self, links):
         for link in links:
-            del self._adjacency[link]
+            del self._discovered_links[link]
 
     def _remove_expired_links(self):
         """ Remove apparently dead links """
         now = time.time()
 
-        expired = [link for link, timestamp in self._adjacency.iteritems() if timestamp + Discovery.LINK_TIMEOUT < now]
+        expired = [link for link, timestamp in self._discovered_links.iteritems() if timestamp + Discovery.LINK_TIMEOUT < now]
         if len(expired) > 0:
             for link in expired:
                 log.debug('_delete_expired_links-> removing link due to timeout: {}.{} -> {}.{}'
