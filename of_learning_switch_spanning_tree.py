@@ -289,9 +289,8 @@ EventHalt = (True, False)
 class Discovery(object):
     __metaclass__ = utils.SingletonType
 
-    _flow_priority = 65000     # Priority of LLDP-catching flow (if any)
-    _link_timeout = 6         # How long until we consider a link dead
-    _timeout_check_period = 3  # How often to check for timeouts
+    LINK_TIMEOUT = 6                 # How long until we consider a link dead
+    LINK_TIMEOUT_CHECK_INTERVAL = 3  # How often to check for timeouts
 
     Link = namedtuple("Link", ("dpid1", "port1", "dpid2", "port2"))
 
@@ -303,7 +302,7 @@ class Discovery(object):
         core.listen_to_dependencies(self, listen_args={'openflow': {'priority': 0xffffffff}})
 
         # TODO: removed for debug - need to uncomment next line
-        # utils.Timer(self._timeout_check_period, self._expire_links, recurring=True)
+        # utils.Timer(Discovery.LINK_TIMEOUT_CHECK_INTERVAL, self._expire_links, recurring=True)
 
     def _handle_openflow_ConnectionUp(self, event):
         """ Will be called when a switch is added. """
@@ -313,7 +312,7 @@ class Discovery(object):
         # Make sure we get LLDP traffic
         match = of.ofp_match(dl_type=pkt.ethernet.LLDP_TYPE, dl_dst=pkt.ETHERNET.LLDP_MULTICAST)
         msg = of.ofp_flow_mod()
-        msg.priority = Discovery._flow_priority
+        msg.priority = 65000
         msg.match = match
         msg.actions.append(of.ofp_action_output(port=of.OFPP_CONTROLLER))
 
@@ -325,13 +324,13 @@ class Discovery(object):
         self._delete_links([link for link in self._adjacency if link.dpid1 == event.dpid or link.dpid2 == event.dpid])
 
     # def _handle_PortStatus(self, event):
-    def _handle_openflow_PortStatus(self, event):
-        """ Will be called when a link changes. """
-        if event.ofp.desc.config == 1:  # means that link is down
-            # event.dpid - switch id
-            # event.port - port number
-            pass
-        pass
+    # def _handle_openflow_PortStatus(self, event):
+    #     """ Will be called when a link changes. """
+    #     if event.ofp.desc.config == 1:  # means that link is down
+    #         # event.dpid - switch id
+    #         # event.port - port number
+    #         pass
+    #     pass
 
     def _handle_openflow_PacketIn(self, event):
         """ Will be called when a packet is sent to the controller. """
@@ -374,7 +373,7 @@ class Discovery(object):
         """ Remove apparently dead links """
         now = time.time()
 
-        expired = [link for link, timestamp in self._adjacency.iteritems() if timestamp + self._link_timeout < now]
+        expired = [link for link, timestamp in self._adjacency.iteritems() if timestamp + Discovery.LINK_TIMEOUT < now]
         if expired:
             for link in expired:
                 log.debug('_expire_links-> removing link due to timeout: {}.{} -> {}.{}'
@@ -391,6 +390,5 @@ def launch():
         Tutorial(event.connection)
 
     core.register('discovery', Discovery())
-    # core.registerNew(Discovery)
     # TODO: removed for debug
     #core.openflow.addListenerByName("ConnectionUp", start_switch)
