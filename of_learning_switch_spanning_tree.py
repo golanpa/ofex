@@ -319,7 +319,7 @@ class Discovery(object):
     def _handle_openflow_ConnectionDown(self, event):
         """ Will be called when a switch goes down. """
         # Delete all links on this switch
-        self._delete_links([link for link in self._discovered_links if event.dpid in [link.dpid1, link.dpid2]])
+        self._remove_links([link for link in self._discovered_links if event.dpid in [link.dpid1, link.dpid2]])
 
     def _handle_openflow_PacketIn(self, event):
         """ Will be called when a packet is sent to the controller. """
@@ -356,7 +356,7 @@ class Discovery(object):
         # do not pass LLDP packet to switch
         return EventHalt
 
-    def _delete_links(self, links):
+    def _remove_links(self, links):
         for link in links:
             del self._discovered_links[link]
 
@@ -364,13 +364,13 @@ class Discovery(object):
         """ Remove apparently dead links """
         now = time.time()
 
-        expired = [link for link, timestamp in self._discovered_links.iteritems() if timestamp + Discovery.LINK_TIMEOUT < now]
+        expired = [link for link, ts in self._discovered_links.iteritems() if ts + Discovery.LINK_TIMEOUT < now]
         if len(expired) > 0:
             for link in expired:
                 log.debug('_delete_expired_links-> removing link due to timeout: {}.{} -> {}.{}'
                           .format(link.dpid1, link.port1, link.dpid2, link.port2))
 
-            self._delete_links(expired)
+            self._remove_links(expired)
 
 
 def launch():
