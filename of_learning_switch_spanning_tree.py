@@ -15,6 +15,8 @@ import time
 
 
 log = core.getLogger()
+EventContinue = (False, False)
+EventHalt = (True, False)
 
 
 class Tutorial(object):
@@ -284,10 +286,13 @@ class PortAuthorizer(object):
     Vertex = namedtuple("Vertex", ('label', ))
 
     def __init__(self):
-        pass
+        # map: switch->port_num->flood_state
+        self._former_flood_status = defaultdict(lambda: defaultdict(lambda: None))
 
     def topology_changed(self, active_links):
         spt = self._spanning_tree_from_topology(active_links)
+
+        self._update_ports_from_spt(spt)
 
     def _spanning_tree_from_topology(self, active_links):
         # v is a set of switches and e is adjacency matrix of the form: src_switch->(dst_switch->port_on_src) which
@@ -310,8 +315,8 @@ class PortAuthorizer(object):
 
         # build edges from all discovered links
         for link in active_links:
-            edges[link.dpid1][link.dpid2].append(link)
             switches.update([link.dpid1, link.dpid2])
+            edges[link.dpid1][link.dpid2].append(link)
 
         # remove links which are not valid in both directions. we need only valid full duplex links so our Tutorial
         # object will learn source of packets correctly
@@ -378,8 +383,8 @@ class PortAuthorizer(object):
 
         return spt
 
-EventContinue = (False, False)
-EventHalt = (True, False)
+    def _update_ports_from_spt(self, spt):
+        pass
 
 
 class Discovery(object):
