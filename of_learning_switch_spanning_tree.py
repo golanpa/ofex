@@ -203,7 +203,7 @@ class LLDPSender(object):
             self._set_timer()
 
     def _remove_port(self, dpid, port_num, set_timer=True):
-        if port_num > of.OFPP_MAX:
+        if port_num >= of.OFPP_MAX:
             return
 
         self._this_cycle = [p for p in self._this_cycle
@@ -215,7 +215,7 @@ class LLDPSender(object):
             self._set_timer()
 
     def _add_port(self, dpid, port_num, port_addr, set_timer=True):
-        if port_num > of.OFPP_MAX:
+        if port_num >= of.OFPP_MAX:
             return
 
         self._remove_port(dpid, port_num, set_timer=False)
@@ -321,15 +321,6 @@ class Discovery(object):
         # Delete all links on this switch
         self._delete_links([link for link in self._adjacency if link.dpid1 == event.dpid or link.dpid2 == event.dpid])
 
-    # def _handle_PortStatus(self, event):
-    # def _handle_openflow_PortStatus(self, event):
-    #     """ Will be called when a link changes. """
-    #     if event.ofp.desc.config == 1:  # means that link is down
-    #         # event.dpid - switch id
-    #         # event.port - port number
-    #         pass
-    #     pass
-
     def _handle_openflow_PacketIn(self, event):
         """ Will be called when a packet is sent to the controller. """
         lldp_pkt = event.parsed
@@ -374,7 +365,7 @@ class Discovery(object):
         now = time.time()
 
         expired = [link for link, timestamp in self._adjacency.iteritems() if timestamp + Discovery.LINK_TIMEOUT < now]
-        if expired:
+        if len(expired) > 0:
             for link in expired:
                 log.debug('_delete_expired_links-> removing link due to timeout: {}.{} -> {}.{}'
                           .format(link.dpid1, link.port1, link.dpid2, link.port2))
