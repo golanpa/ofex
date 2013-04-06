@@ -290,11 +290,11 @@ class PortAuthorizer(object):
         self._former_flood_status = defaultdict(lambda: defaultdict(lambda: None))
 
     def topology_changed(self, active_links):
-        spt = self._spanning_tree_from_topology(active_links)
+        spt = self._graph_from_topology(active_links)
 
-        self._update_ports_from_spt(spt)
+        self._update_ports_from_spt(spt, active_links)
 
-    def _spanning_tree_from_topology(self, active_links):
+    def _graph_from_topology(self, active_links):
         # v is a set of switches and e is adjacency matrix of the form: src_switch->(dst_switch->port_on_src) which
         # means that src_switch is connected to dst_switch via port_on_src which is located in src_switch.
         G = self._graph_from_topology(active_links)
@@ -371,7 +371,7 @@ class PortAuthorizer(object):
 
         if len(vertex_map.keys()) > 0:
             for src_switch, e in E.iteritems():
-                dst_switch, port = e
+                dst_switch, src_port = e
 
                 # get the sets where the switches are in
                 src_switch_set = vertex_map[src_switch]
@@ -383,13 +383,49 @@ class PortAuthorizer(object):
                     UnionFind.union(src_switch_set, dst_switch_set)
 
                     # update spt with both direction edges
-                    spt[src_switch].add((dst_switch, port))
+                    spt[src_switch].add((dst_switch, src_port))
                     spt[dst_switch].add((src_switch, E[dst_switch][src_switch]))
 
         return spt
 
-    def _update_ports_from_spt(self, spt):
-        pass
+    def _update_ports_from_spt(self, spt, active_links):
+        for src_switch, edges_set in spt.iteritems():
+            con = core.openflow.getConnection(src_switch)
+
+            # check that we have a valid connection to the switch
+            if con:
+                # modify switch port's flood flag according spt.
+                # ports in spt are enabled for flooding, others are disabled.
+                switch_ports_in_spt = [e[1] for e in edges_set]
+
+                for p in con.ports.itervalues():
+                    if p.port_no < of.OFPP_MAX:
+                        flood = p.port_no in switch_ports_in_spt
+
+                        #we always enable flooding for ports that are connected to hosts
+                        if not flood and self._is_port_not_connected_to_switch(active_links, src_switch, p.port_no):
+                            flood = True
+
+                        # make modification to port only if state was changed
+                        if self._former_flood_status[src_switch][p.port_no] != flood:
+                            self._former_flood_status[src_switch][p.port_no] = flood
+
+                            # send port modification message to switch configuring its flood flag
+                            config = 0 if flood else of.OFPPC_NO_FLOOD
+
+                            msg = of.ofp_port_mod(port_no=p.port_no, hw_addr=p.hw_addr,
+                                                  mask=of.OFPPC_NO_FLOOD, config=config)
+                            con.send(msg)
+
+    def _is_port_not_connected_to_switch(self, active_links, dpid, port):
+        """ check if a port is not connected to another switch """
+        for link in active_links:
+            if (dpid, port) == (link.dpid1, link.port1):
+                return False
+            if (dpid, port) == (link.dpid2, link.port2):
+                return False
+
+        return True
 
 
 class Discovery(object):
