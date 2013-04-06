@@ -104,7 +104,8 @@ class Tutorial(object):
             self._install_flow(dpid, packet, packet_in, dst_port=known_in_port)
         else:
             # we do not know in which port destination is connected if at all
-            log.debug('Broadcasting dpid={}, type={}, {}.{} -> {}.{}'
+
+            log.debug('Switch dpid={} is being told to flood a packet, type={}, {}.{} -> {}.{}'
                       .format(dpid, packet.type, packet.src, packet_in.in_port, packet.dst, of.OFPP_FLOOD))
             self.send_packet(packet_in.buffer_id, packet_in.data, of.OFPP_FLOOD, packet_in.in_port)
 
@@ -113,7 +114,7 @@ class Tutorial(object):
     def _install_flow(self, dpid, packet, packet_in, dst_port):
         """ Installing rule in switch. Rule is from any source to specific destination and src_port via dst_port """
 
-        log.debug('Installing flow: dpid={}, match={{ dst:{}, in_port:{} }} output via port {}'
+        log.debug('A flow record is set on a switch: dpid={}, match={{ dst:{}, in_port:{} }} output via port {}'
                   .format(dpid, packet.dst, packet_in.in_port, dst_port))
 
         msg = of.ofp_flow_mod()
@@ -137,7 +138,7 @@ class Tutorial(object):
     def _uninstall_flows(self, dpid, packet, old_port):
         """ Un-installing all rules to specific destination. """
 
-        log.debug('Un-installing flow: dpid={}, {} -> {} output via port {}'
+        log.debug('A flow record is removed from a switch: dpid={}, {} -> {} output via port {}'
                   .format(dpid, "ff:ff:ff:ff:ff:ff", packet.src, old_port))
 
         msg = of.ofp_flow_mod(command=of.OFPFC_DELETE)
