@@ -297,7 +297,7 @@ class PortAuthorizer(object):
     def topology_changed(self, active_links):
         spt = self._spt_from_topology(active_links)
 
-        self._update_ports_from_spt(spt, active_links)
+        self._update_switch_from_spt(spt, active_links)
 
     def _spt_from_topology(self, active_links):
         # v is a set of switches and e is adjacency matrix of the form: src_switch->(dst_switch->port_on_src) which
@@ -397,7 +397,7 @@ class PortAuthorizer(object):
 
         return spt
 
-    def _update_ports_from_spt(self, spt, active_links):
+    def _update_switch_from_spt(self, spt, active_links):
         # spt is a map: src_switch->set of (dst_switch, port_num) tuple
 
         for src_switch, edges_set in spt.iteritems():
@@ -436,9 +436,23 @@ class PortAuthorizer(object):
                                               mask=of.OFPPC_NO_FLOOD, config=config)
                         con.send(msg)
                     except:
-                        log.exception("Failed updating port status on switch: dpid={}, port={}"
+                        log.exception('Failed updating port status on switch: dpid={}, port={}'
                                       .format(src_switch, p.port_no))
                         del self._former_flood_status[src_switch][p.port_no]
+
+                    if not flood:
+                        try:
+
+                            log.debug('uninstalling flows containing invalid spt port: dpid={}, port={}'
+                                      .format(src_switch, p.port_no))
+
+                            msg = of.ofp_flow_mod(command=of.OFPFC_DELETE, out_port=p.port_no)
+                            con.send(msg)
+                        except:
+                            log.exception('Failed uninstalling flows containing invalid spt port: dpid={}, port={}'
+                                          .format(src_switch, p.port_no))
+                            del self._former_flood_status[src_switch][p.port_no]
+
 
     def _is_port_not_connected_to_switch(self, active_links, dpid, port):
         """ check if a port is not connected to another switch """
