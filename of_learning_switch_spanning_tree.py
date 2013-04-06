@@ -283,7 +283,9 @@ class LLDPSender(object):
 
 
 class PortAuthorizer(object):
-    Vertex = namedtuple("Vertex", ('label', ))
+    class Vertex(object):
+        def __init__(self, label):
+            self.label = label
 
     def __init__(self):
         # map: switch->port_num->flood_state
@@ -293,11 +295,11 @@ class PortAuthorizer(object):
         self._former_flood_status.clear()
 
     def topology_changed(self, active_links):
-        spt = self._graph_from_topology(active_links)
+        spt = self._spt_from_topology(active_links)
 
         self._update_ports_from_spt(spt, active_links)
 
-    def _graph_from_topology(self, active_links):
+    def _spt_from_topology(self, active_links):
         # v is a set of switches and e is adjacency matrix of the form: src_switch->(dst_switch->port_on_src) which
         # means that src_switch is connected to dst_switch via port_on_src which is located in src_switch.
         G = self._graph_from_topology(active_links)
@@ -314,7 +316,7 @@ class PortAuthorizer(object):
 
         # edges is adjacency matrix of the form: src_switch->(dst_switch->port_on_src) which
         # means that src_switch is connected to dst_switch via port_on_src which is located in src_switch.
-        edges = defaultdict(lambda: defaultdict(lambda: list))
+        edges = defaultdict(lambda: defaultdict(lambda: list()))
         switches = set()
 
         # build edges from all discovered links
@@ -374,21 +376,20 @@ class PortAuthorizer(object):
         vertex_map = {v.label: v for v in V}
 
         if len(vertex_map.keys()) > 0:
-            for src_switch, e in E.iteritems():
-                dst_switch, src_port = e
+            for src_switch, edges in E.iteritems():
+                for dst_switch, src_port in edges.iteritems():
+                    # get the sets where the switches are in
+                    src_switch_set = vertex_map[src_switch]
+                    dst_switch_set = vertex_map[dst_switch]
 
-                # get the sets where the switches are in
-                src_switch_set = vertex_map[src_switch]
-                dst_switch_set = vertex_map[dst_switch]
+                    # check that the edge does not connect two switches of the same set
+                    if UnionFind.find(src_switch_set) != UnionFind.find(dst_switch_set):
+                        # edge connects disjoint sets - unite the sets
+                        UnionFind.union(src_switch_set, dst_switch_set)
 
-                # check that the edge does not connect two switches of the same set
-                if UnionFind.find(src_switch_set) != UnionFind.find(dst_switch_set):
-                    # edge connects disjoint sets - unite the sets
-                    UnionFind.union(src_switch_set, dst_switch_set)
-
-                    # update spt with both direction edges
-                    spt[src_switch].add((dst_switch, src_port))
-                    spt[dst_switch].add((src_switch, E[dst_switch][src_switch]))
+                        # update spt with both direction edges
+                        spt[src_switch].add((dst_switch, src_port))
+                        spt[dst_switch].add((src_switch, E[dst_switch][src_switch]))
 
         return spt
 
@@ -464,12 +465,12 @@ class Discovery(object):
         core.listen_to_dependencies(self, listen_args={'openflow': {'priority': 0xffffffff}})
 
         # TODO: removed for debug - need to uncomment next line
-        # Timer(Discovery.LINK_TIMEOUT_CHECK_INTERVAL, self._remove_expired_links, recurring=True)
+        Timer(Discovery.LINK_TIMEOUT_CHECK_INTERVAL, self._remove_expired_links, recurring=True)
 
     def _handle_openflow_ConnectionUp(self, event):
         """ Will be called when a switch is added. """
-        log.debug('_handle_openflow_ConnectionUp-> Installing flow: route LLDP messages to controller: dpid={}, {}'
-                  .format(event.dpid, str(event)))
+        log.debug('_handle_openflow_ConnectionUp-> Installing flow: route LLDP messages to controller: dpid={}'
+                  .format(event.dpid))
 
         # forward event to port authorizer so it can do its thing
         self._port_authorizer._handle_openflow_ConnectionUp(event)
@@ -503,8 +504,8 @@ class Discovery(object):
         r_dpid = int(ch_id.id)
         r_port = int(po_id.id)
 
-        log.debug('_handle_openflow_PacketIn-> got LLDP packet: type={}, dpid={}, packet: dpid={}, port={}'
-                  .format(event.parsed.type, event.dpid, r_dpid, r_port))
+        # log.debug('_handle_openflow_PacketIn-> got LLDP packet: type={}, dpid={}, packet: dpid={}, port={}'
+        #           .format(event.parsed.type, event.dpid, r_dpid, r_port))
 
         if (event.dpid, event.port) == (r_dpid, r_port):
             log.warning('Port received its own LLDP packet: dpid={}, port={} - ignoring'
@@ -556,4 +557,4 @@ def launch():
 
     core.register('discovery', Discovery())
     # TODO: removed for debug
-    #core.openflow.addListenerByName("ConnectionUp", start_switch)
+    core.openflow.addListenerByName("ConnectionUp", start_switch)

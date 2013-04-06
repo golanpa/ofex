@@ -14,34 +14,34 @@ class Edge:
 
 class LoopTopology( Topo ):
     """ This topology class emulates a network with a cycle that should
-	be resolved using the Spanning Tree algorithm.
+    be resolved using the Spanning Tree algorithm.
 
-	The topology is illustrated below:
+    The topology is illustrated below:
 
-					  +---------+
-					  | Host H5 |
-					  +----+----+
-						   |
-					 +-----+-----+
-					 | Switch S1 |
-					 +-----+-----+
-						   |
-		   +---------------+---------------+
-		   |                               |
-	 +-----+-----+                   +-----+-----+
-	 | Switch S2 |                   | Switch S3 |
-	 +-----+-----+                   +-----+-----+
-		   |                               |
-		   +---------------+---------------+
-						   |
-					 +-----+-----+
-					 | Switch S4 |
-					 +-----+-----+
-						   |
-					  +----+----+
-					  | Host H6 |
-					  +---------+
-	"""
+                      +---------+
+                      | Host H5 |
+                      +----+----+
+                           |
+                     +-----+-----+
+                     | Switch S1 |
+                     +-----+-----+
+                           |
+           +---------------+---------------+
+           |                               |
+     +-----+-----+                   +-----+-----+
+     | Switch S2 |                   | Switch S3 |
+     +-----+-----+                   +-----+-----+
+           |                               |
+           +---------------+---------------+
+                           |
+                     +-----+-----+
+                     | Switch S4 |
+                     +-----+-----+
+                           |
+                      +----+----+
+                      | Host H6 |
+                      +---------+
+    """
 
     def __init__( self ):
         """Create custom topo."""
@@ -127,26 +127,26 @@ class SimpleLoopTopology( Topo ):
     should start down, then during operation another switch-switch should be taken down and
     the originally down link should be taken up.
 
-	The topology is illustrated below:
+    The topology is illustrated below:
 
-	 +---------+                                     +---------+
-	 | Host H4 |                                     | Host H5 |
-	 +----+----+  +-----------+       +-----------+  +----+----+
-		  +-------+           |       |           +-------+
-				  | Switch S1 +-------+ Switch S2 |
-		          +           |       |           +
-	              +-----+-----+       +-----+-----+
-	                    |                   |
-	                    |   +-----------+   |
-	                    |   |           |   |
-	                    +---+ Switch S3 +---+
-	                        |           |
-	                        +-----+-----+
-	                              |
-	                         +----+----+
-	                         | Host H6 |
-	                         +---------+
-	"""
+     +---------+                                     +---------+
+     | Host H4 |                                     | Host H5 |
+     +----+----+  +-----------+       +-----------+  +----+----+
+          +-------+           |       |           +-------+
+                  | Switch S1 +-------+ Switch S2 |
+                  +           |       |           +
+                  +-----+-----+       +-----+-----+
+                        |                   |
+                        |   +-----------+   |
+                        |   |           |   |
+                        +---+ Switch S3 +---+
+                            |           |
+                            +-----+-----+
+                                  |
+                             +----+----+
+                             | Host H6 |
+                             +---------+
+"""
     def __init__( self ):
         """Create custom topo."""
 
