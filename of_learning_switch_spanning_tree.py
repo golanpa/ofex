@@ -289,6 +289,9 @@ class PortAuthorizer(object):
         # map: switch->port_num->flood_state
         self._former_flood_status = defaultdict(lambda: defaultdict(lambda: None))
 
+    def _handle_openflow_ConnectionUp(self, event):
+        self._former_flood_status.clear()
+
     def topology_changed(self, active_links):
         spt = self._graph_from_topology(active_links)
 
@@ -299,7 +302,8 @@ class PortAuthorizer(object):
         # means that src_switch is connected to dst_switch via port_on_src which is located in src_switch.
         G = self._graph_from_topology(active_links)
 
-        # build spanning tree from topology graph
+        # build spanning tree from topology graph.
+        # spt is a map: src_switch->set of (dst_switch, port_num) tuple
         spt = self._spt_from_graph(G)
 
         return spt
@@ -389,36 +393,51 @@ class PortAuthorizer(object):
         return spt
 
     def _update_ports_from_spt(self, spt, active_links):
+        # spt is a map: src_switch->set of (dst_switch, port_num) tuple
+
         for src_switch, edges_set in spt.iteritems():
             con = core.openflow.getConnection(src_switch)
 
             # check that we have a valid connection to the switch
-            if con:
-                # modify switch port's flood flag according spt.
-                # ports in spt are enabled for flooding, others are disabled.
-                switch_ports_in_spt = [e[1] for e in edges_set]
+            if not con:
+                continue
 
-                for p in con.ports.itervalues():
-                    if p.port_no < of.OFPP_MAX:
-                        flood = p.port_no in switch_ports_in_spt
+            # modify switch port's flood flag according spt.
+            # ports in spt are enabled for flooding, others are disabled.
+            switch_ports_in_spt = [e[1] for e in edges_set]
 
-                        #we always enable flooding for ports that are connected to hosts
-                        if not flood and self._is_port_not_connected_to_switch(active_links, src_switch, p.port_no):
-                            flood = True
+            for p in con.ports.itervalues():
+                if p.port_no >= of.OFPP_MAX:
+                    continue
 
-                        # make modification to port only if state was changed
-                        if self._former_flood_status[src_switch][p.port_no] != flood:
-                            self._former_flood_status[src_switch][p.port_no] = flood
+                flood = p.port_no in switch_ports_in_spt
 
-                            # send port modification message to switch configuring its flood flag
-                            config = 0 if flood else of.OFPPC_NO_FLOOD
+                #we always enable flooding for ports that are connected to hosts
+                if not flood and self._is_port_not_connected_to_switch(active_links, src_switch, p.port_no):
+                    flood = True
 
-                            msg = of.ofp_port_mod(port_no=p.port_no, hw_addr=p.hw_addr,
-                                                  mask=of.OFPPC_NO_FLOOD, config=config)
-                            con.send(msg)
+                # make modification to port only if state was changed
+                if self._former_flood_status[src_switch][p.port_no] != flood:
+                    self._former_flood_status[src_switch][p.port_no] = flood
+
+                    # send port modification message to switch configuring its flood flag
+                    config = 0 if flood else of.OFPPC_NO_FLOOD
+
+                    try:
+                        log.debug('sending port flood flag modification message to switch: dpid={}, port={}, flood={}'
+                                  .format(src_switch, p.port_no, flood))
+
+                        msg = of.ofp_port_mod(port_no=p.port_no, hw_addr=p.hw_addr,
+                                              mask=of.OFPPC_NO_FLOOD, config=config)
+                        con.send(msg)
+                    except:
+                        log.exception("Failed updating port status on switch: dpid={}, port={}"
+                                      .format(src_switch, p.port_no))
+                        del self._former_flood_status[src_switch][p.port_no]
 
     def _is_port_not_connected_to_switch(self, active_links, dpid, port):
         """ check if a port is not connected to another switch """
+
         for link in active_links:
             if (dpid, port) == (link.dpid1, link.port1):
                 return False
@@ -451,6 +470,9 @@ class Discovery(object):
         """ Will be called when a switch is added. """
         log.debug('_handle_openflow_ConnectionUp-> Installing flow: route LLDP messages to controller: dpid={}, {}'
                   .format(event.dpid, str(event)))
+
+        # forward event to port authorizer so it can do its thing
+        self._port_authorizer._handle_openflow_ConnectionUp(event)
 
         # make sure LLDP packets are sent to the controller so we can handle it
         match = of.ofp_match(dl_type=pkt.ethernet.LLDP_TYPE, dl_dst=pkt.ETHERNET.LLDP_MULTICAST)
