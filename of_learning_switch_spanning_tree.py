@@ -362,6 +362,10 @@ class PortAuthorizer(object):
         return switches, edges
 
     def _spt_from_graph(self, G):
+        """
+        create spt for the graph using Kruskal's algorithm using disjoint sets and tree based
+        union-find data structure
+        """
         V, E = G
 
         #map: src_switch->set of (dst_switch, port_num) tuple
@@ -382,7 +386,7 @@ class PortAuthorizer(object):
                     src_switch_set = vertex_map[src_switch]
                     dst_switch_set = vertex_map[dst_switch]
 
-                    # check that the edge does not connect two switches of the same set
+                    # can we add this edge safely without causing a loop?
                     if UnionFind.find(src_switch_set) != UnionFind.find(dst_switch_set):
                         # edge connects disjoint sets - unite the sets
                         UnionFind.union(src_switch_set, dst_switch_set)
