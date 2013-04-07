@@ -31,6 +31,30 @@ class Tutorial(object):
         # This binds our PacketIn event listener
         connection.addListeners(self)
 
+        # This binds our _handle_port_authorization_changed event listener
+        self._open_flow_discovery = core.discovery
+        self._open_flow_discovery.add_port_authorization_listener(self.connection.dpid, self)
+        self._unauthorized_ports = dict()
+
+    def _handle_port_authorization_changed(self, dpid, port_no, authorized):
+        """ called when port authorization was changed during spanning tree calculation """
+
+        # we are only interested in ports that belongs to this switch
+        if dpid != self.connection.dpid:
+            return
+
+        if authorized:
+            # port is authorized
+            self._unauthorized_ports.pop(port_no, None)
+
+        else:
+            # port is not authorized any more
+            self._unauthorized_ports[port_no] = None
+
+            # remove what what we have already learnt on the un-authorized port
+            self.mac_to_in_port = {mac: in_port for mac, in_port in self.mac_to_in_port.iteritems()
+                                   if in_port != port_no}
+
     def _handle_PacketIn(self, event):
         """
         Handles packet in messages from the switch.
@@ -98,12 +122,18 @@ class Tutorial(object):
 
                 self._uninstall_flows(dpid, packet, known_in_port)
 
+                if packet_in.in_port not in self._unauthorized_ports:
+                    log.debug('Learning: dpid={}, {} via port {}'.format(dpid, packet.src, packet_in.in_port))
+                    self.mac_to_in_port[packet.src] = packet_in.in_port
+                else:
+                    log.debug('Not learning un-authorized port: dpid={}, in_port={}'.format(dpid, packet_in.in_port))
+        else:
+            if packet_in.in_port not in self._unauthorized_ports:
+                # new authorized src.in_port - learn it
                 log.debug('Learning: dpid={}, {} via port {}'.format(dpid, packet.src, packet_in.in_port))
                 self.mac_to_in_port[packet.src] = packet_in.in_port
-        else:
-            # new src.in_port - learn it
-            log.debug('Learning: dpid={}, {} via port {}'.format(dpid, packet.src, packet_in.in_port))
-            self.mac_to_in_port[packet.src] = packet_in.in_port
+            else:
+                log.debug('Not learning un-authorized port: dpid={}, in_port={}'.format(dpid, packet_in.in_port))
 
         # check if we know in which port the destination is connected to
         known_in_port = self.mac_to_in_port.get(packet.dst, None)
@@ -288,8 +318,17 @@ class PortAuthorizer(object):
             self.label = label
 
     def __init__(self):
+        # listeners for port authorization change events
+        #
+        # map: dpid-> list(listener)
+        # listener must implement:  def _handle_port_authorization_changed(self, port_no, authorized)
+        self._listeners = defaultdict(list)
+
         # map: switch->port_num->flood_state
         self._former_port_valid_status = defaultdict(lambda: defaultdict(lambda: None))
+
+    def add_listener(self, dpid, listener):
+        self._listeners[dpid].append(listener)
 
     def _handle_openflow_ConnectionUp(self, event):
         self._former_port_valid_status.clear()
@@ -453,6 +492,10 @@ class PortAuthorizer(object):
                                           .format(src_switch, p.port_no))
                             del self._former_port_valid_status[src_switch][p.port_no]
 
+                    # notify all listeners (e.g: Tutorial objects) that port authorization has changed
+                    for listener in self._listeners[src_switch]:
+                        listener._handle_port_authorization_changed(src_switch, p.port_no, is_port_valid)
+
     def _is_port_not_connected_to_switch(self, active_links, dpid, port):
         """ check if a port is not connected to another switch """
 
@@ -482,6 +525,9 @@ class Discovery(object):
         core.listen_to_dependencies(self, listen_args={'openflow': {'priority': 0xffffffff}})
 
         Timer(Discovery.LINK_TIMEOUT_CHECK_INTERVAL, self._remove_expired_links, recurring=True)
+
+    def add_port_authorization_listener(self, dpid, listener):
+        self._port_authorizer.add_listener(dpid, listener)
 
     def _handle_openflow_ConnectionUp(self, event):
         """ Will be called when a switch is added. """
