@@ -113,7 +113,7 @@ class Tutorial(object):
         else:
             # we do not know in which port destination is connected if at all
             log.debug('Broadcasting dpid={}, type={}, {}.{} -> {}.{}'
-            .format(dpid, packet.type, packet.src, packet_in.in_port, packet.dst, of.OFPP_FLOOD))
+                      .format(dpid, packet.type, packet.src, packet_in.in_port, packet.dst, of.OFPP_FLOOD))
             self.send_packet(packet_in.buffer_id, packet_in.data, of.OFPP_FLOOD, packet_in.in_port)
 
         log.debug('act_like_switch: finished: dpid={}'.format(dpid))
@@ -234,9 +234,9 @@ class LLDPSender(object):
 
         self._timer = None
         num_packets = len(self._this_cycle) + len(self._next_cycle)
-        per_packet_interval = self._send_cycle_time / float(num_packets)
 
         if num_packets != 0:
+            per_packet_interval = self._send_cycle_time / float(num_packets)
             self._timer = Timer(per_packet_interval, self._timer_handler, recurring=True)
 
     def _timer_handler(self):
@@ -289,10 +289,10 @@ class PortAuthorizer(object):
 
     def __init__(self):
         # map: switch->port_num->flood_state
-        self._former_flood_status = defaultdict(lambda: defaultdict(lambda: None))
+        self._former_port_valid_status = defaultdict(lambda: defaultdict(lambda: None))
 
     def _handle_openflow_ConnectionUp(self, event):
-        self._former_flood_status.clear()
+        self._former_port_valid_status.clear()
 
     def topology_changed(self, active_links):
         spt = self._spt_from_topology(active_links)
@@ -422,8 +422,8 @@ class PortAuthorizer(object):
                     is_port_valid = True
 
                 # make modification to port only if state was changed
-                if self._former_flood_status[src_switch][p.port_no] != is_port_valid:
-                    self._former_flood_status[src_switch][p.port_no] = is_port_valid
+                if self._former_port_valid_status[src_switch][p.port_no] != is_port_valid:
+                    self._former_port_valid_status[src_switch][p.port_no] = is_port_valid
 
                     # send port modification message to switch configuring its flood flag
                     config = 0 if is_port_valid else of.OFPPC_NO_FLOOD
@@ -438,7 +438,7 @@ class PortAuthorizer(object):
                     except:
                         log.exception('Failed updating port flood status on switch: dpid={}, port={}'
                                       .format(src_switch, p.port_no))
-                        del self._former_flood_status[src_switch][p.port_no]
+                        del self._former_port_valid_status[src_switch][p.port_no]
 
                     if not is_port_valid:
                         try:
@@ -451,7 +451,7 @@ class PortAuthorizer(object):
                         except:
                             log.exception('Failed uninstalling flows containing invalid spt port: dpid={}, port={}'
                                           .format(src_switch, p.port_no))
-                            del self._former_flood_status[src_switch][p.port_no]
+                            del self._former_port_valid_status[src_switch][p.port_no]
 
     def _is_port_not_connected_to_switch(self, active_links, dpid, port):
         """ check if a port is not connected to another switch """
