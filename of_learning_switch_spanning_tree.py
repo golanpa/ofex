@@ -481,7 +481,6 @@ class Discovery(object):
         # listen to events with high priorit so we get them before all others
         core.listen_to_dependencies(self, listen_args={'openflow': {'priority': 0xffffffff}})
 
-        # TODO: removed for debug - need to uncomment next line
         Timer(Discovery.LINK_TIMEOUT_CHECK_INTERVAL, self._remove_expired_links, recurring=True)
 
     def _handle_openflow_ConnectionUp(self, event):
@@ -573,5 +572,4 @@ def launch():
         Tutorial(event.connection)
 
     core.register('discovery', Discovery())
-    # TODO: removed for debug
     core.openflow.addListenerByName("ConnectionUp", start_switch)
