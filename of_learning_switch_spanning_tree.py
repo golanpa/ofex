@@ -407,7 +407,7 @@ class PortAuthorizer(object):
             if not con:
                 continue
 
-            # modify switch port's flood flag according spt.
+            # modify switch port's flood flag and remove flows containing invalid ports according spt.
             # ports in spt are enabled for flooding, others are disabled.
             switch_ports_in_spt = [e[1] for e in edges_set]
 
@@ -415,32 +415,32 @@ class PortAuthorizer(object):
                 if p.port_no >= of.OFPP_MAX:
                     continue
 
-                flood = p.port_no in switch_ports_in_spt
+                is_port_valid = p.port_no in switch_ports_in_spt
 
                 #we always enable flooding for ports that are connected to hosts
-                if not flood and self._is_port_not_connected_to_switch(active_links, src_switch, p.port_no):
-                    flood = True
+                if not is_port_valid and self._is_port_not_connected_to_switch(active_links, src_switch, p.port_no):
+                    is_port_valid = True
 
                 # make modification to port only if state was changed
-                if self._former_flood_status[src_switch][p.port_no] != flood:
-                    self._former_flood_status[src_switch][p.port_no] = flood
+                if self._former_flood_status[src_switch][p.port_no] != is_port_valid:
+                    self._former_flood_status[src_switch][p.port_no] = is_port_valid
 
                     # send port modification message to switch configuring its flood flag
-                    config = 0 if flood else of.OFPPC_NO_FLOOD
+                    config = 0 if is_port_valid else of.OFPPC_NO_FLOOD
 
                     try:
-                        log.debug('sending port flood flag modification message to switch: dpid={}, port={}, flood={}'
-                                  .format(src_switch, p.port_no, flood))
+                        log.debug('sending port flood flag modification message to switch:dpid={}, port={}, is_valid={}'
+                                  .format(src_switch, p.port_no, is_port_valid))
 
                         msg = of.ofp_port_mod(port_no=p.port_no, hw_addr=p.hw_addr,
                                               mask=of.OFPPC_NO_FLOOD, config=config)
                         con.send(msg)
                     except:
-                        log.exception('Failed updating port status on switch: dpid={}, port={}'
+                        log.exception('Failed updating port flood status on switch: dpid={}, port={}'
                                       .format(src_switch, p.port_no))
                         del self._former_flood_status[src_switch][p.port_no]
 
-                    if not flood:
+                    if not is_port_valid:
                         try:
 
                             log.debug('uninstalling flows containing invalid spt port: dpid={}, port={}'
@@ -452,7 +452,6 @@ class PortAuthorizer(object):
                             log.exception('Failed uninstalling flows containing invalid spt port: dpid={}, port={}'
                                           .format(src_switch, p.port_no))
                             del self._former_flood_status[src_switch][p.port_no]
-
 
     def _is_port_not_connected_to_switch(self, active_links, dpid, port):
         """ check if a port is not connected to another switch """
