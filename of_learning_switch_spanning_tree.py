@@ -32,8 +32,8 @@ class Tutorial(object):
         connection.addListeners(self)
 
         # This binds our _handle_port_authorization_changed event listener
-        self._open_flow_discovery = core.discovery
-        self._open_flow_discovery.add_port_authorization_listener(self.connection.dpid, self)
+        self._discovery_component = core.discovery
+        self._discovery_component.add_port_authorization_listener(self.connection.dpid, self)
         self._unauthorized_ports = dict()
 
     def _handle_port_authorization_changed(self, dpid, port_no, authorized):
