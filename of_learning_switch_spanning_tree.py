@@ -416,14 +416,17 @@ class PortAuthorizer(object):
         # starting with each switch(vertex) in it own set
         [UnionFind.make_set(v) for v in V]
 
-        vertex_map = {v.label: v for v in V}
+        switch_map = {v.label: v for v in V}
 
-        if len(vertex_map.keys()) > 0:
+        # try maintaining some kind of order
+        sorted_switch_list = sorted(list(switch_map.keys()))
+
+        if len(sorted_switch_list) > 0:
             for src_switch, edges in E.iteritems():
                 for dst_switch, src_port in edges.iteritems():
                     # get the sets where the switches are in
-                    src_switch_set = vertex_map[src_switch]
-                    dst_switch_set = vertex_map[dst_switch]
+                    src_switch_set = switch_map[src_switch]
+                    dst_switch_set = switch_map[dst_switch]
 
                     # can we add this edge safely without causing a loop?
                     if UnionFind.find(src_switch_set) != UnionFind.find(dst_switch_set):
