@@ -418,10 +418,7 @@ class PortAuthorizer(object):
 
         switch_map = {v.label: v for v in V}
 
-        # try maintaining some kind of order
-        sorted_switch_list = sorted(list(switch_map.keys()))
-
-        if len(sorted_switch_list) > 0:
+        if len(switch_map.keys()) > 0:
             for src_switch, edges in E.iteritems():
                 for dst_switch, src_port in edges.iteritems():
                     # get the sets where the switches are in
@@ -436,6 +433,27 @@ class PortAuthorizer(object):
                         # update spt with both direction edges
                         spt[src_switch].add((dst_switch, src_port))
                         spt[dst_switch].add((src_switch, E[dst_switch][src_switch]))
+
+        # switch_map = {v.label: v for v in V}
+        #
+        # # try maintaining some kind of order
+        # sorted_switch_list = sorted(list(switch_map.keys()))
+        #
+        # if len(sorted_switch_list) > 0:
+        #     for src_switch, edges in E.iteritems():
+        #         for dst_switch, src_port in edges.iteritems():
+        #             # get the sets where the switches are in
+        #             src_switch_set = switch_map[src_switch]
+        #             dst_switch_set = switch_map[dst_switch]
+        #
+        #             # can we add this edge safely without causing a loop?
+        #             if UnionFind.find(src_switch_set) != UnionFind.find(dst_switch_set):
+        #                 # edge connects disjoint sets - unite the sets
+        #                 UnionFind.union(src_switch_set, dst_switch_set)
+        #
+        #                 # update spt with both direction edges
+        #                 spt[src_switch].add((dst_switch, src_port))
+        #                 spt[dst_switch].add((src_switch, E[dst_switch][src_switch]))
 
         return spt
 
