@@ -19,6 +19,17 @@ EventContinue = (False, False)
 EventHalt = (True, False)
 
 
+def install_flow_direct_lldp_packets_to_controller(connection):
+    # make sure LLDP packets are sent to the controller so we can handle it
+    match = of.ofp_match(dl_type=pkt.ethernet.LLDP_TYPE, dl_dst=pkt.ETHERNET.LLDP_MULTICAST)
+    msg = of.ofp_flow_mod()
+    msg.priority = 65000
+    msg.match = match
+    msg.actions.append(of.ofp_action_output(port=of.OFPP_CONTROLLER))
+
+    connection.send(msg)
+
+
 class Tutorial(object):
     """
     A Tutorial object is created for each switch that connects.
@@ -26,7 +37,7 @@ class Tutorial(object):
     """
     def __init__(self, connection):
         self.connection = connection
-        self.mac_to_in_port = dict()
+        self._mac_to_in_port = dict()
 
         # This binds our PacketIn event listener
         connection.addListeners(self)
@@ -52,8 +63,28 @@ class Tutorial(object):
             self._unauthorized_ports[port_no] = None
 
             # remove what what we have already learnt on the un-authorized port
-            self.mac_to_in_port = {mac: in_port for mac, in_port in self.mac_to_in_port.iteritems()
+            self._mac_to_in_port = {mac: in_port for mac, in_port in self._mac_to_in_port.iteritems()
                                    if in_port != port_no}
+
+    def _reset_state_and_flows(self):
+        log.debug('resetting state and flows: dpid={}'.format(self.connection.dpid))
+        # remove all flows
+        msg = of.ofp_flow_mod(command=of.OFPFC_DELETE)
+        self.connection.send(msg)
+
+        # source learning state
+        self._mac_to_in_port.clear()
+        self._unauthorized_ports.clear()
+
+        # reset FLOOD flag on all ports
+        for p in self.connection.ports.itervalues():
+            if p.port_no >= of.OFPP_MAX:
+                continue
+
+            msg = of.ofp_port_mod(port_no=p.port_no, hw_addr=p.hw_addr,
+                                  mask=of.OFPPC_NO_FLOOD, config=0)
+            self.connection.send(msg)
+
 
     def _handle_PacketIn(self, event):
         """
@@ -113,7 +144,7 @@ class Tutorial(object):
                   .format(dpid, packet.type, packet.src, packet_in.in_port, packet.dst))
 
         # check if we already know this src
-        known_in_port = self.mac_to_in_port.get(packet.src, None)
+        known_in_port = self._mac_to_in_port.get(packet.src, None)
         if known_in_port:
             # check whether src incoming port was changed
             if known_in_port != packet_in.in_port:
@@ -124,19 +155,19 @@ class Tutorial(object):
 
                 if packet_in.in_port not in self._unauthorized_ports:
                     log.debug('Learning: dpid={}, {} via port {}'.format(dpid, packet.src, packet_in.in_port))
-                    self.mac_to_in_port[packet.src] = packet_in.in_port
+                    self._mac_to_in_port[packet.src] = packet_in.in_port
                 else:
                     log.debug('Not learning un-authorized port: dpid={}, in_port={}'.format(dpid, packet_in.in_port))
         else:
             if packet_in.in_port not in self._unauthorized_ports:
                 # new authorized src.in_port - learn it
                 log.debug('Learning: dpid={}, {} via port {}'.format(dpid, packet.src, packet_in.in_port))
-                self.mac_to_in_port[packet.src] = packet_in.in_port
+                self._mac_to_in_port[packet.src] = packet_in.in_port
             else:
                 log.debug('Not learning un-authorized port: dpid={}, in_port={}'.format(dpid, packet_in.in_port))
 
         # check if we know in which port the destination is connected to
-        known_in_port = self.mac_to_in_port.get(packet.dst, None)
+        known_in_port = self._mac_to_in_port.get(packet.dst, None)
         if known_in_port:
             # install new rule: dst via in_port
             self._install_flow(dpid, packet, packet_in, dst_port=known_in_port)
@@ -184,7 +215,7 @@ class Tutorial(object):
         self.connection.send(msg)
 
 
-class LLDPSender(object):
+class LLDPMessageBroker(object):
     """ Sends out LLDP discovery packets to all switch neighbours """
 
     SendItem = namedtuple("LLDPSenderItem", ('dpid', 'port_num', 'packet'))
@@ -253,7 +284,7 @@ class LLDPSender(object):
         self._remove_port(dpid, port_num, set_timer=False)
 
         lldpPacket = self._create_lldp_packet(dpid, port_num, port_addr)
-        self._next_cycle.append(LLDPSender.SendItem(dpid, port_num, lldpPacket))
+        self._next_cycle.append(LLDPMessageBroker.SendItem(dpid, port_num, lldpPacket))
 
         if set_timer:
             self._set_timer()
@@ -327,11 +358,19 @@ class PortAuthorizer(object):
         # map: switch->port_num->flood_state
         self._former_port_valid_status = defaultdict(lambda: defaultdict(lambda: None))
 
+        # map: hold available switches on the network
+        self._network_switch_set = set()
+
     def add_listener(self, dpid, listener):
         self._listeners[dpid].append(listener)
 
     def _handle_openflow_ConnectionUp(self, event):
         self._former_port_valid_status.clear()
+
+        self._network_switch_set.update([event.dpid])
+
+    def _handle_openflow_ConnectionDown(self, event):
+        self._network_switch_set.discard(event.dpid)
 
     def topology_changed(self, active_links):
         spt = self._spt_from_topology(active_links)
@@ -342,6 +381,16 @@ class PortAuthorizer(object):
         # v is a set of switches and e is adjacency matrix of the form: src_switch->(dst_switch->port_on_src) which
         # means that src_switch is connected to dst_switch via port_on_src which is located in src_switch.
         G = self._graph_from_topology(active_links)
+
+        # Note: check that the graph is connected (contains all available nodes over the network).
+        # if it does not it means that we need to reset all flows and switch learning since
+        # current flow may not be valid if int the future the graph becomes connected but not
+        # in the same topology as before, which may cause invalid flows to direct traffic to
+        # a wrong port.
+
+        topology_switch_set = G[0]
+        if self._network_switch_set != topology_switch_set:
+            return None
 
         # build spanning tree from topology graph.
         # spt is a map: src_switch->set of (dst_switch, port_num) tuple
@@ -434,31 +483,16 @@ class PortAuthorizer(object):
                         spt[src_switch].add((dst_switch, src_port))
                         spt[dst_switch].add((src_switch, E[dst_switch][src_switch]))
 
-        # switch_map = {v.label: v for v in V}
-        #
-        # # try maintaining some kind of order
-        # sorted_switch_list = sorted(list(switch_map.keys()))
-        #
-        # if len(sorted_switch_list) > 0:
-        #     for src_switch, edges in E.iteritems():
-        #         for dst_switch, src_port in edges.iteritems():
-        #             # get the sets where the switches are in
-        #             src_switch_set = switch_map[src_switch]
-        #             dst_switch_set = switch_map[dst_switch]
-        #
-        #             # can we add this edge safely without causing a loop?
-        #             if UnionFind.find(src_switch_set) != UnionFind.find(dst_switch_set):
-        #                 # edge connects disjoint sets - unite the sets
-        #                 UnionFind.union(src_switch_set, dst_switch_set)
-        #
-        #                 # update spt with both direction edges
-        #                 spt[src_switch].add((dst_switch, src_port))
-        #                 spt[dst_switch].add((src_switch, E[dst_switch][src_switch]))
-
         return spt
 
     def _update_switch_from_spt(self, spt, active_links):
         # spt is a map: src_switch->set of (dst_switch, port_num) tuple
+
+        if not spt:
+            # No spt means that we must reset all flows and all what the switches has learnt.
+            # See note in _spt_from_topology method.
+            self._reset_all_switches()
+            return
 
         for src_switch, edges_set in spt.iteritems():
             con = core.openflow.getConnection(src_switch)
@@ -528,6 +562,19 @@ class PortAuthorizer(object):
 
         return True
 
+    def _reset_all_switches(self):
+        """ reset all flows and learnt sources from all switches """
+
+        for switch, listeners in self._listeners.iteritems():
+            for listener in listeners:
+                # remove all flows and source learning state
+                listener._reset_state_and_flows()
+
+                # re-install LLDP messages to controller redirect flows
+                con = core.openflow.getConnection(switch)
+                install_flow_direct_lldp_packets_to_controller(con)
+
+
 
 class Discovery(object):
     __metaclass__ = SingletonType
@@ -539,7 +586,7 @@ class Discovery(object):
 
     def __init__(self):
         self._discovered_links = dict()  # maps from discovered link to time stamp
-        self._sender = LLDPSender()
+        self._lldpBroker = LLDPMessageBroker()
         self._port_authorizer = PortAuthorizer()
 
         # listen to events with high priorit so we get them before all others
@@ -558,19 +605,15 @@ class Discovery(object):
         # forward event to port authorizer so it can do its thing
         self._port_authorizer._handle_openflow_ConnectionUp(event)
 
-        # make sure LLDP packets are sent to the controller so we can handle it
-        match = of.ofp_match(dl_type=pkt.ethernet.LLDP_TYPE, dl_dst=pkt.ETHERNET.LLDP_MULTICAST)
-        msg = of.ofp_flow_mod()
-        msg.priority = 65000
-        msg.match = match
-        msg.actions.append(of.ofp_action_output(port=of.OFPP_CONTROLLER))
-
-        event.connection.send(msg)
+        install_flow_direct_lldp_packets_to_controller(event.connection)
 
     def _handle_openflow_ConnectionDown(self, event):
         """ Will be called when a switch goes down. """
         # Delete all links on this switch
         self._remove_links([link for link in self._discovered_links if event.dpid in [link.dpid1, link.dpid2]])
+
+        # forward event to port authorizer so it can do its thing
+        self._port_authorizer._handle_openflow_ConnectionDown(event)
 
     def _handle_openflow_PacketIn(self, event):
         """ Will be called when a packet is sent to the controller. """
