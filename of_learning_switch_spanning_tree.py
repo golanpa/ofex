@@ -20,6 +20,9 @@ EventHalt = (True, False)
 
 
 def install_flow_direct_lldp_packets_to_controller(connection):
+    log.debug('Installing flow to direct LLDP messages to controller: dpid={}, match={{ type:{}, dst:{} }} output via port {}'
+              .format(connection.dpid, pkt.ethernet.LLDP_TYPE, pkt.ETHERNET.LLDP_MULTICAST, of.OFPP_CONTROLLER))
+
     # make sure LLDP packets are sent to the controller so we can handle it
     match = of.ofp_match(dl_type=pkt.ethernet.LLDP_TYPE, dl_dst=pkt.ETHERNET.LLDP_MULTICAST)
     msg = of.ofp_flow_mod()
@@ -67,8 +70,9 @@ class Tutorial(object):
                                    if in_port != port_no}
 
     def _reset_state_and_flows(self):
-        log.debug('resetting state and flows: dpid={}'.format(self.connection.dpid))
         # remove all flows
+        log.debug('Un-installing all flows: dpid={}, match={{ }} delete'.format(self.connection.dpid))
+
         msg = of.ofp_flow_mod(command=of.OFPFC_DELETE)
         self.connection.send(msg)
 
@@ -173,8 +177,9 @@ class Tutorial(object):
             self._install_flow(dpid, packet, packet_in, dst_port=known_in_port)
         else:
             # we do not know in which port destination is connected if at all
-            log.debug('Broadcasting dpid={}, type={}, {}.{} -> {}.{}'
+            log.debug('Flooding packet: dpid={}, type={}, src={} port={} -> dst={} port={}'
                       .format(dpid, packet.type, packet.src, packet_in.in_port, packet.dst, of.OFPP_FLOOD))
+
             self.send_packet(packet_in.buffer_id, packet_in.data, of.OFPP_FLOOD, packet_in.in_port)
 
         log.debug('act_like_switch: finished: dpid={}'.format(dpid))
@@ -206,8 +211,8 @@ class Tutorial(object):
     def _uninstall_flows(self, dpid, packet, old_port):
         """ Un-installing all rules to specific destination. """
 
-        log.debug('Un-installing flow: dpid={}, {} -> {} output via port {}'
-                  .format(dpid, "ff:ff:ff:ff:ff:ff", packet.src, old_port))
+        log.debug('Un-installing flow: dpid={}, match={{ dst:{} }} delete'
+                  .format(dpid, packet.src))
 
         msg = of.ofp_flow_mod(command=of.OFPFC_DELETE)
         msg.match.dl_dst = packet.src
@@ -222,9 +227,8 @@ class LLDPMessageBroker(object):
 
     def __init__(self, send_cycle_time=1):
         """
-        send_cycle_time is the time (in seconds) that this sender will take to
-          send all discovery packets.  Thus, it should be the link timeout
-          interval at most.
+        send_cycle_time: time (in seconds) that will take to send all LLDP packets in current and next cycles.
+                         At most, it will be equal to the link timeout.
         """
         # Packets remaining to be sent in this cycle
         self._this_cycle = list()
@@ -253,6 +257,7 @@ class LLDPMessageBroker(object):
 
     def _handle_openflow_PortStatus(self, event):
         """ Track changes to switch ports """
+
         if event.added or (event.modified and event.ofp.desc.config == 0):
             self._add_port(event.dpid, event.port, event.ofp.desc.hw_addr)
         elif event.deleted or (event.modified and event.ofp.desc.config == 1):
@@ -302,11 +307,7 @@ class LLDPMessageBroker(object):
 
     def _timer_handler(self):
         """
-        Called by a timer to actually send packets.
-
-        Picks the first packet off this cycle's list, sends it, and then puts
-        it on the next-cycle list.  When this cycle's list is empty, starts
-        the next cycle.
+        Sending LLDP packets. First sending packets from current cycle only when finished sending from next cycle.
         """
         if len(self._this_cycle) == 0:
             self._this_cycle = self._next_cycle
@@ -420,7 +421,7 @@ class PortAuthorizer(object):
                 if src_switch is dst_switch:
                     continue
 
-                #check if src_switch is connected to dst_switch
+                # check if src_switch is connected to dst_switch
                 if dst_switch not in edges[src_switch]:
                     continue
 
@@ -523,8 +524,10 @@ class PortAuthorizer(object):
                     config = 0 if is_port_valid else of.OFPPC_NO_FLOOD
 
                     try:
-                        log.debug('sending port flood flag modification message to switch:dpid={}, port={}, is_valid={}'
-                                  .format(src_switch, p.port_no, is_port_valid))
+                        if is_port_valid:
+                            log.debug('Port enabled by spanning tree: dpid={}, port={}'.format(src_switch, p.port_no))
+                        else:
+                            log.debug('Port disabled by spanning tree: dpid={}, port={}'.format(src_switch, p.port_no))
 
                         msg = of.ofp_port_mod(port_no=p.port_no, hw_addr=p.hw_addr,
                                               mask=of.OFPPC_NO_FLOOD, config=config)
@@ -536,8 +539,7 @@ class PortAuthorizer(object):
 
                     if not is_port_valid:
                         try:
-
-                            log.debug('uninstalling flows containing invalid spt port: dpid={}, port={}'
+                            log.debug('Un-installing flow containing invalid spt port:: dpid={}, match={{ out_port:{} }} delete'
                                       .format(src_switch, p.port_no))
 
                             msg = of.ofp_flow_mod(command=of.OFPFC_DELETE, out_port=p.port_no)
@@ -566,14 +568,15 @@ class PortAuthorizer(object):
         """ reset all flows and learnt sources from all switches """
 
         for switch, listeners in self._listeners.iteritems():
+            log.debug('Resetting state and flows since spanning tree is not over connected graph: dpid={}'
+                      .format(switch))
+
             for listener in listeners:
                 # remove all flows and source learning state
                 listener._reset_state_and_flows()
 
-                # re-install LLDP messages to controller redirect flows
                 con = core.openflow.getConnection(switch)
                 install_flow_direct_lldp_packets_to_controller(con)
-
 
 
 class Discovery(object):
@@ -599,8 +602,6 @@ class Discovery(object):
 
     def _handle_openflow_ConnectionUp(self, event):
         """ Will be called when a switch is added. """
-        log.debug('_handle_openflow_ConnectionUp-> Installing flow: route LLDP messages to controller: dpid={}'
-                  .format(event.dpid))
 
         # forward event to port authorizer so it can do its thing
         self._port_authorizer._handle_openflow_ConnectionUp(event)
@@ -609,8 +610,15 @@ class Discovery(object):
 
     def _handle_openflow_ConnectionDown(self, event):
         """ Will be called when a switch goes down. """
+
         # Delete all links on this switch
-        self._remove_links([link for link in self._discovered_links if event.dpid in [link.dpid1, link.dpid2]])
+        downLinks = [link for link in self._discovered_links if event.dpid in [link.dpid1, link.dpid2]]
+
+        for link in downLinks:
+            log.debug('Existing link is removed: ({}, {}) -> ({}, {}), reason=switch is down, dpid={}'
+                      .format(link.dpid1, link.port1, link.dpid2, link.port2, event.dpid))
+
+        self._remove_links(downLinks)
 
         # forward event to port authorizer so it can do its thing
         self._port_authorizer._handle_openflow_ConnectionDown(event)
@@ -642,7 +650,7 @@ class Discovery(object):
         link = Discovery.Link(r_dpid, r_port, event.dpid, event.port)
 
         if link not in self._discovered_links:
-            log.info('link detected: {}.{} -> {}.{}'.format(link.dpid1, link.port1, link.dpid2, link.port2))
+            log.info('New link found: ({}, {}) -> ({}, {})'.format(link.dpid1, link.port1, link.dpid2, link.port2))
 
             self._discovered_links[link] = time.time()
             # update ports on switches
@@ -668,7 +676,7 @@ class Discovery(object):
         expired = [link for link, ts in self._discovered_links.iteritems() if ts + Discovery.LINK_TIMEOUT < now]
         if len(expired) > 0:
             for link in expired:
-                log.debug('_delete_expired_links-> removing link due to timeout: {}.{} -> {}.{}'
+                log.debug('Existing link is removed: ({}, {}) -> ({}, {}), reason=not found for long time '
                           .format(link.dpid1, link.port1, link.dpid2, link.port2))
 
             self._remove_links(expired)
