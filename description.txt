@@ -30,9 +30,11 @@ A. Learn the topology:
 
     When it discovers an active port, it prepares an LLDP packet for it.
 
-    Using a timer, this class sends the next LLDP message to its neighbour. The interval in which is message is sent
-    depends on the number of neighbours and the time that was allocated to send to all neighbours.
-
+    Using a timer, this class sends the next LLDP message to its neighbour. We could have implemented the timer as
+    sending all LLDP at the beginning of each second, but then if the topology contained a lost of hosts and switches,
+    we would have bursts in every beginning of each second, so we divided the LLDP packet on the all the timeout period.
+    The interval in which is message is sent depends on the number of neighbours and the time that was allocated to
+    send to all neighbours.
 
     3. Upon switch up event, the Discovery singleton installs a special rule directing all LLDP packets to it.
     When a LLDP packet arrives it checked. If its from an unknown switch it is considered as new link and an event
