@@ -1,9 +1,4 @@
-""" OpenFlow Exercise - Sample File
-This file was created as part of the course Advanced Workshop in IP Networks
-in IDC Herzliya.
-
-This code is based on the official OpenFlow tutorial code.
-"""
+""" Authors: Golan Parashi 032158008, Avi Lachmish 025292194, Dudu Ben Ari 031377179 """
 
 from utils import SingletonType, Timer, UnionFind
 from collections import namedtuple, defaultdict
