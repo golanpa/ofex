@@ -30,9 +30,8 @@ A. Learn the topology:
 
     When it discovers an active port, it prepares an LLDP packet for it.
 
-    Using a timer, this class sends the next LLDP message to its neighbour, using "double buffer" technique (maintains
-    two lists: one for sending messages for known ports - current -  and the other for sending messages to port that
-               were added while sending to ports in the current list).
+    Using a timer, this class sends the next LLDP message to its neighbour. The interval in which is message is sent
+    depends on the number of neighbours and the time that was allocated to send to all neighbours.
 
 
     3. Upon switch up event, the Discovery singleton installs a special rule directing all LLDP packets to it.

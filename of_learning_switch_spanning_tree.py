@@ -4,7 +4,6 @@ from utils import SingletonType, Timer, UnionFind
 from collections import namedtuple, defaultdict
 import pox.openflow.libopenflow_01 as of
 import pox.lib.packet as pkt
-from random import shuffle
 from pox.core import core
 import time
 
@@ -183,19 +182,18 @@ class Tutorial(object):
 class LLDPMessageBroker(object):
     """ Sends out LLDP discovery packets to all switch neighbours """
 
-    LLDPRawMessage = namedtuple("LLDPMessage", ('dpid', 'raw_lldp_packet'))
+    LLDPRawMessage = namedtuple("LLDPMessage", ('dpid', 'port_num', 'raw_lldp_packet'))
 
     def __init__(self, round_time=1):
         """
-        round_time: time in seconds that will take to send all LLDP packets in current and next rounds (at max it can be
-                    equal to link timeout).
+        round_time: time in seconds that all LLDP packets must be sent to all neighbours. it can be
+                    equals to link timeout at maximum.
         """
 
-        # hold packets that needs to be sent in the current and next round
-        # we insert new packets to next round until we finish sending all the packets from current round.
-        # only then we send the packets in next round.
-        self._current_send_round, self._next_send_round = list(), list()
+        # hold packets that needs to be sent to neighbours.
+        self._neighbours_queue = list()
 
+        # hold packets that needs to be sen
         self._send_round_time = round_time
 
         self._timer = None
@@ -229,8 +227,7 @@ class LLDPMessageBroker(object):
             self._remove_port(event.dpid, event.port)
 
     def _remove_switch(self, dpid, set_timer=True):
-        self._current_send_round = [p for p in self._current_send_round if p.dpid != dpid]
-        self._next_send_round = [p for p in self._next_send_round if p.dpid != dpid]
+        self._neighbours_queue = [p for p in self._neighbours_queue if p.dpid != dpid]
 
         if set_timer:
             self._set_timer()
@@ -239,10 +236,7 @@ class LLDPMessageBroker(object):
         if port_num >= of.OFPP_MAX:
             return
 
-        self._current_send_round = [p for p in self._current_send_round
-                                    if p.dpid != dpid or p.port_num != port_num]
-        self._next_send_round = [p for p in self._next_send_round
-                                 if p.dpid != dpid or p.port_num != port_num]
+        self._neighbours_queue = [p for p in self._neighbours_queue if p.dpid != dpid or p.port_num != port_num]
 
         if set_timer:
             self._set_timer()
@@ -253,8 +247,9 @@ class LLDPMessageBroker(object):
 
         self._remove_port(dpid, port_num, set_timer=False)
 
+
         lldpPacket = self._create_lldp_packet(dpid, port_num, port_addr)
-        self._next_send_round.append(LLDPMessageBroker.LLDPRawMessage(dpid, lldpPacket))
+        self._neighbours_queue.append(LLDPMessageBroker.LLDPRawMessage(dpid, port_num, lldpPacket))
 
         if set_timer:
             self._set_timer()
@@ -264,25 +259,21 @@ class LLDPMessageBroker(object):
             self._timer.stop()
 
         self._timer = None
-        num_packets = len(self._current_send_round) + len(self._next_send_round)
+        neighbours_count = len(self._neighbours_queue)
 
-        if num_packets != 0:
-            per_packet_interval = self._send_round_time / float(num_packets)
+        if neighbours_count != 0:
+            per_packet_interval = self._send_round_time / float(neighbours_count)
             self._timer = Timer(per_packet_interval, self._timer_handler, recurring=True)
 
     def _timer_handler(self):
-        """
-        Sending LLDP packets. First sending packets from current cycle only when finished sending from next cycle.
-        """
-        if len(self._current_send_round) == 0:
-            self._current_send_round = self._next_send_round
-            self._next_send_round = []
-            shuffle(self._current_send_round)
+        """ Sending LLDP packets to next neighbour. """
 
-        if len(self._current_send_round) > 0:
-            item = self._current_send_round.pop(0)
-            self._next_send_round.append(item)
+        if len(self._neighbours_queue) > 0:
+            item = self._neighbours_queue.pop(0)
             core.openflow.sendToDPID(item.dpid, item.raw_lldp_packet)
+
+            # re-insert the packet for next round
+            self._neighbours_queue.append(item)
 
     def _create_lldp_packet(self, dpid, port_num, port_addr):
         """ Creating LLDP packet """
