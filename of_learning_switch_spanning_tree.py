@@ -183,7 +183,7 @@ class Tutorial(object):
 class LLDPMessageBroker(object):
     """ Sends out LLDP discovery packets to all switch neighbours """
 
-    SendItem = namedtuple("LLDPSenderItem", ('dpid', 'port_num', 'packet'))
+    LLDPRawMessage = namedtuple("LLDPMessage", ('dpid', 'port_num', 'packet'))
 
     def __init__(self, round_time=1):
         """
@@ -236,9 +236,9 @@ class LLDPMessageBroker(object):
             return
 
         self._current_send_round = [p for p in self._current_send_round
-                            if p.dpid != dpid or p.port_num != port_num]
+                                    if p.dpid != dpid or p.port_num != port_num]
         self._next_send_round = [p for p in self._next_send_round
-                            if p.dpid != dpid or p.port_num != port_num]
+                                 if p.dpid != dpid or p.port_num != port_num]
 
         if set_timer:
             self._set_timer()
@@ -250,7 +250,7 @@ class LLDPMessageBroker(object):
         self._remove_port(dpid, port_num, set_timer=False)
 
         lldpPacket = self._create_lldp_packet(dpid, port_num, port_addr)
-        self._next_send_round.append(LLDPMessageBroker.SendItem(dpid, port_num, lldpPacket))
+        self._next_send_round.append(LLDPMessageBroker.LLDPRawMessage(dpid, port_num, lldpPacket))
 
         if set_timer:
             self._set_timer()
