@@ -183,7 +183,7 @@ class Tutorial(object):
 class LLDPMessageBroker(object):
     """ Sends out LLDP discovery packets to all switch neighbours """
 
-    LLDPRawMessage = namedtuple("LLDPMessage", ('dpid', 'port_num', 'packet'))
+    LLDPRawMessage = namedtuple("LLDPMessage", ('dpid', 'raw_lldp_packet'))
 
     def __init__(self, round_time=1):
         """
@@ -204,6 +204,8 @@ class LLDPMessageBroker(object):
         core.listen_to_dependencies(self)
 
     def _handle_openflow_ConnectionUp(self, event):
+        """ monitor switch up """
+
         self._remove_switch(event.dpid, set_timer=False)
 
         ports = [(port.port_no, port.hw_addr) for port in event.ofp.ports]
@@ -214,10 +216,12 @@ class LLDPMessageBroker(object):
         self._set_timer()
 
     def _handle_openflow_ConnectionDown(self, event):
+        """ monitor switch down """
+
         self._remove_switch(event.dpid)
 
     def _handle_openflow_PortStatus(self, event):
-        """ Track changes to switch ports """
+        """ monitor switch ports """
 
         if event.added or (event.modified and event.ofp.desc.config == 0):
             self._add_port(event.dpid, event.port, event.ofp.desc.hw_addr)
@@ -250,7 +254,7 @@ class LLDPMessageBroker(object):
         self._remove_port(dpid, port_num, set_timer=False)
 
         lldpPacket = self._create_lldp_packet(dpid, port_num, port_addr)
-        self._next_send_round.append(LLDPMessageBroker.LLDPRawMessage(dpid, port_num, lldpPacket))
+        self._next_send_round.append(LLDPMessageBroker.LLDPRawMessage(dpid, lldpPacket))
 
         if set_timer:
             self._set_timer()
@@ -278,7 +282,7 @@ class LLDPMessageBroker(object):
         if len(self._current_send_round) > 0:
             item = self._current_send_round.pop(0)
             self._next_send_round.append(item)
-            core.openflow.sendToDPID(item.dpid, item.packet)
+            core.openflow.sendToDPID(item.dpid, item.raw_lldp_packet)
 
     def _create_lldp_packet(self, dpid, port_num, port_addr):
         """ Creating LLDP packet """
