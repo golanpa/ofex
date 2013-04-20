@@ -1,7 +1,7 @@
 OpenFlow exercise part B:
 
 The code for this part enhances part A by eliminating layer 2 cycles. It does that by computing a spanning tree over
-the active links of the network, edges, and neutralizing those who are not in the resulting tree.
+the active links of the network, edges, and neutralizing those ports which are not in the resulting tree.
 
 A. Learn the topology:
     1. This part is implemented by a dedicated class named "Discovery".
@@ -42,17 +42,17 @@ A. Learn the topology:
     further processed by any other listener, thus, preventing from Tutorial class objects to handle LLDP messages
     (remember that the Discovery singleton has registered to dependencies events with the highest priority).
 
-    5-7. The Discovery singleton maintains a time stamp for each link discovered by LLDP messages. Using a timer, each link
-    timestamp is periodically checked in order to determine if the link has became inactive. If so, this link is removed
-    and an event is fired for the listeners indicating that topology has changed. The scan is made every 3 seconds
-    and removes links which are inactive for 6 seconds.
+    5-7. The Discovery singleton maintains a time stamp for each link discovered by LLDP messages. Using a timer, each
+    link timestamp is periodically checked in order to determine if the link has became inactive. If so, this link is
+    removed and an event is fired for the listeners indicating that topology has changed. The scan is made every 3
+    seconds and removes links which are inactive for 6 seconds.
 
     When a neighboring switch goes down, all links to it a re removed and an event is fired for the listeners indicating
     that topology has changed.
 
 
 B. Find a Spanning Tree:
-    The discovery singleton also holds a reverence to an object of type "PortAuthorizer".
+    The discovery singleton also holds a reference to an object of type "PortAuthorizer".
 
     The "PortAuthorizer" class builds a graph of the network out of the active links maintained by the discovery
     singleton. There is only one instance of this class.
@@ -68,7 +68,12 @@ B. Find a Spanning Tree:
     Kruskal's algorithm using disjoint sets and tree based union-find data structure.
 
     After the spanning tree is created, it is scanned and all the ports that appears in it are considered valid. Other
-    ports are considered as forbidden. Ports which are connected to hosts are always being considered as valid ones.
+    ports are considered as forbidden since they cause a loop. Ports which are not connected to switches are assumed to
+    be connected to hosts and therefore are always being considered as valid ones.
+
+    Note: Ports are ONLY considered forbidden if they CAUSE A LOOP. In any other case they are considered valid.
+    For example, if a links' ports are considered valid and suddenly the link goes down, the ports will are still
+    considered as valid since there is not way they cause a loop (no link).
 
 
 C. Change your switch behavior to avoid sending on forbidden links:
