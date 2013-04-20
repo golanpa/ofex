@@ -91,6 +91,16 @@ C. Change your switch behavior to avoid sending on forbidden links:
     port from their in-memory mapping.
 
 
+D. objects interaction scheme:
 
-
-
+                                                                                      Tutorial   Tutorial  Tutorial
+                                                                                          ^         ^         ^
+                                     LLDPMessageBroker                                    |---------|---------|
+                                            ^                                                       |
+                                            |                                      port authorization changed event
+                                            |                                                       |
+                                            |                                                       |
+                                            |                                                PortAuthorizer
+                                            |                                                       ^
+                                            |                                                       |
+    pox core _----> dependency events ----------------->  Discovery --> topology changed event -----|
