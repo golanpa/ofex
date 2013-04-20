@@ -19,20 +19,6 @@ EventContinue = (False, False)
 EventHalt = (True, False)
 
 
-def install_flow_direct_lldp_packets_to_controller(connection):
-    log.debug('Installing flow to direct LLDP messages to controller: dpid={}, match={{ type:{}, dst:{} }} output via port {}'
-              .format(connection.dpid, pkt.ethernet.LLDP_TYPE, pkt.ETHERNET.LLDP_MULTICAST, of.OFPP_CONTROLLER))
-
-    # make sure LLDP packets are sent to the controller so we can handle it
-    match = of.ofp_match(dl_type=pkt.ethernet.LLDP_TYPE, dl_dst=pkt.ETHERNET.LLDP_MULTICAST)
-    msg = of.ofp_flow_mod()
-    msg.priority = 65000
-    msg.match = match
-    msg.actions.append(of.ofp_action_output(port=of.OFPP_CONTROLLER))
-
-    connection.send(msg)
-
-
 class Tutorial(object):
     """
     A Tutorial object is created for each switch that connects.
@@ -67,28 +53,7 @@ class Tutorial(object):
 
             # remove what what we have already learnt on the un-authorized port
             self._mac_to_in_port = {mac: in_port for mac, in_port in self._mac_to_in_port.iteritems()
-                                   if in_port != port_no}
-
-    def _reset_state_and_flows(self):
-        # remove all flows
-        log.debug('Un-installing all flows: dpid={}, match={{ }} delete'.format(self.connection.dpid))
-
-        msg = of.ofp_flow_mod(command=of.OFPFC_DELETE)
-        self.connection.send(msg)
-
-        # source learning state
-        self._mac_to_in_port.clear()
-        self._unauthorized_ports.clear()
-
-        # reset FLOOD flag on all ports
-        for p in self.connection.ports.itervalues():
-            if p.port_no >= of.OFPP_MAX:
-                continue
-
-            msg = of.ofp_port_mod(port_no=p.port_no, hw_addr=p.hw_addr,
-                                  mask=of.OFPPC_NO_FLOOD, config=0)
-            self.connection.send(msg)
-
+                                    if in_port != port_no}
 
     def _handle_PacketIn(self, event):
         """
@@ -155,7 +120,7 @@ class Tutorial(object):
                 log.info('src in_port was changed: dpid={}, src={} known in_port={}, new in_port={}'
                          .format(dpid, packet.src, known_in_port, packet_in.in_port))
 
-                self._uninstall_flows(dpid, packet, known_in_port)
+                self._uninstall_flows(dpid, packet)
 
                 if packet_in.in_port not in self._unauthorized_ports:
                     log.debug('Learning: dpid={}, {} via port {}'.format(dpid, packet.src, packet_in.in_port))
@@ -208,7 +173,7 @@ class Tutorial(object):
 
         log.debug('Sending: dpid={}, {}.{} -> {}.{}'.format(dpid, packet.src, packet_in.in_port, packet.dst, dst_port))
 
-    def _uninstall_flows(self, dpid, packet, old_port):
+    def _uninstall_flows(self, dpid, packet):
         """ Un-installing all rules to specific destination. """
 
         log.debug('Un-installing flow: dpid={}, match={{ dst:{} }} delete'
@@ -225,19 +190,20 @@ class LLDPMessageBroker(object):
 
     SendItem = namedtuple("LLDPSenderItem", ('dpid', 'port_num', 'packet'))
 
-    def __init__(self, send_cycle_time=1):
+    def __init__(self, round_time=1):
         """
-        send_cycle_time: time (in seconds) that will take to send all LLDP packets in current and next cycles.
-                         At most, it will be equal to the link timeout.
+        round_time: time in seconds that will take to send all LLDP packets in current and next rounds (at max it can be
+                    equal to link timeout).
         """
-        # Packets remaining to be sent in this cycle
-        self._this_cycle = list()
 
-        # Packets we've already sent in this cycle
-        self._next_cycle = list()
+        # hold packets that needs to be sent in the current and next round
+        # we insert new packets to next round until we finish sending all the packets from current round.
+        # only then we send the packets in next round.
+        self._current_send_round, self._next_send_round = list(), list()
+
+        self._send_round_time = round_time
 
         self._timer = None
-        self._send_cycle_time = send_cycle_time
 
         # register for switch events
         core.listen_to_dependencies(self)
@@ -264,8 +230,8 @@ class LLDPMessageBroker(object):
             self._remove_port(event.dpid, event.port)
 
     def _remove_switch(self, dpid, set_timer=True):
-        self._this_cycle = [p for p in self._this_cycle if p.dpid != dpid]
-        self._next_cycle = [p for p in self._next_cycle if p.dpid != dpid]
+        self._current_send_round = [p for p in self._current_send_round if p.dpid != dpid]
+        self._next_send_round = [p for p in self._next_send_round if p.dpid != dpid]
 
         if set_timer:
             self._set_timer()
@@ -274,9 +240,9 @@ class LLDPMessageBroker(object):
         if port_num >= of.OFPP_MAX:
             return
 
-        self._this_cycle = [p for p in self._this_cycle
+        self._current_send_round = [p for p in self._current_send_round
                             if p.dpid != dpid or p.port_num != port_num]
-        self._next_cycle = [p for p in self._next_cycle
+        self._next_send_round = [p for p in self._next_send_round
                             if p.dpid != dpid or p.port_num != port_num]
 
         if set_timer:
@@ -289,7 +255,7 @@ class LLDPMessageBroker(object):
         self._remove_port(dpid, port_num, set_timer=False)
 
         lldpPacket = self._create_lldp_packet(dpid, port_num, port_addr)
-        self._next_cycle.append(LLDPMessageBroker.SendItem(dpid, port_num, lldpPacket))
+        self._next_send_round.append(LLDPMessageBroker.SendItem(dpid, port_num, lldpPacket))
 
         if set_timer:
             self._set_timer()
@@ -299,28 +265,28 @@ class LLDPMessageBroker(object):
             self._timer.stop()
 
         self._timer = None
-        num_packets = len(self._this_cycle) + len(self._next_cycle)
+        num_packets = len(self._current_send_round) + len(self._next_send_round)
 
         if num_packets != 0:
-            per_packet_interval = self._send_cycle_time / float(num_packets)
+            per_packet_interval = self._send_round_time / float(num_packets)
             self._timer = Timer(per_packet_interval, self._timer_handler, recurring=True)
 
     def _timer_handler(self):
         """
         Sending LLDP packets. First sending packets from current cycle only when finished sending from next cycle.
         """
-        if len(self._this_cycle) == 0:
-            self._this_cycle = self._next_cycle
-            self._next_cycle = []
-            shuffle(self._this_cycle)
+        if len(self._current_send_round) == 0:
+            self._current_send_round = self._next_send_round
+            self._next_send_round = []
+            shuffle(self._current_send_round)
 
-        if len(self._this_cycle) > 0:
-            item = self._this_cycle.pop(0)
-            self._next_cycle.append(item)
+        if len(self._current_send_round) > 0:
+            item = self._current_send_round.pop(0)
+            self._next_send_round.append(item)
             core.openflow.sendToDPID(item.dpid, item.packet)
 
     def _create_lldp_packet(self, dpid, port_num, port_addr):
-        """ Build discovery packet """
+        """ Creating LLDP packet """
 
         chassis_id = pkt.chassis_id(subtype=pkt.chassis_id.SUB_CHASSIS, id=str(dpid))
 
@@ -359,19 +325,11 @@ class PortAuthorizer(object):
         # map: switch->port_num->flood_state
         self._former_port_valid_status = defaultdict(lambda: defaultdict(lambda: None))
 
-        # map: hold available switches on the network
-        self._network_switch_set = set()
-
     def add_listener(self, dpid, listener):
         self._listeners[dpid].append(listener)
 
     def _handle_openflow_ConnectionUp(self, event):
         self._former_port_valid_status.clear()
-
-        self._network_switch_set.update([event.dpid])
-
-    def _handle_openflow_ConnectionDown(self, event):
-        self._network_switch_set.discard(event.dpid)
 
     def topology_changed(self, active_links):
         spt = self._spt_from_topology(active_links)
@@ -382,16 +340,6 @@ class PortAuthorizer(object):
         # v is a set of switches and e is adjacency matrix of the form: src_switch->(dst_switch->port_on_src) which
         # means that src_switch is connected to dst_switch via port_on_src which is located in src_switch.
         G = self._graph_from_topology(active_links)
-
-        # Note: check that the graph is connected (contains all available nodes over the network).
-        # if it does not it means that we need to reset all flows and switch learning since
-        # current flow may not be valid if int the future the graph becomes connected but not
-        # in the same topology as before, which may cause invalid flows to direct traffic to
-        # a wrong port.
-
-        topology_switch_set = G[0]
-        if self._network_switch_set != topology_switch_set:
-            return None
 
         # build spanning tree from topology graph.
         # spt is a map: src_switch->set of (dst_switch, port_num) tuple
@@ -489,12 +437,6 @@ class PortAuthorizer(object):
     def _update_switch_from_spt(self, spt, active_links):
         # spt is a map: src_switch->set of (dst_switch, port_num) tuple
 
-        if not spt:
-            # No spt means that we must reset all flows and all what the switches has learnt.
-            # See note in _spt_from_topology method.
-            self._reset_all_switches()
-            return
-
         for src_switch, edges_set in spt.iteritems():
             con = core.openflow.getConnection(src_switch)
 
@@ -564,20 +506,6 @@ class PortAuthorizer(object):
 
         return True
 
-    def _reset_all_switches(self):
-        """ reset all flows and learnt sources from all switches """
-
-        for switch, listeners in self._listeners.iteritems():
-            log.debug('Resetting state and flows since spanning tree is not over connected graph: dpid={}'
-                      .format(switch))
-
-            for listener in listeners:
-                # remove all flows and source learning state
-                listener._reset_state_and_flows()
-
-                con = core.openflow.getConnection(switch)
-                install_flow_direct_lldp_packets_to_controller(con)
-
 
 class Discovery(object):
     __metaclass__ = SingletonType
@@ -606,7 +534,7 @@ class Discovery(object):
         # forward event to port authorizer so it can do its thing
         self._port_authorizer._handle_openflow_ConnectionUp(event)
 
-        install_flow_direct_lldp_packets_to_controller(event.connection)
+        self._install_flow_direct_lldp_packets_to_controller(event.connection)
 
     def _handle_openflow_ConnectionDown(self, event):
         """ Will be called when a switch goes down. """
@@ -619,9 +547,6 @@ class Discovery(object):
                       .format(link.dpid1, link.port1, link.dpid2, link.port2, event.dpid))
 
         self._remove_links(downLinks)
-
-        # forward event to port authorizer so it can do its thing
-        self._port_authorizer._handle_openflow_ConnectionDown(event)
 
     def _handle_openflow_PacketIn(self, event):
         """ Will be called when a packet is sent to the controller. """
@@ -680,6 +605,20 @@ class Discovery(object):
                           .format(link.dpid1, link.port1, link.dpid2, link.port2))
 
             self._remove_links(expired)
+
+    def _install_flow_direct_lldp_packets_to_controller(self, connection):
+        log.debug('Installing flow to direct LLDP messages to controller: dpid={}, match={{ type:{}, dst:{} }}'
+                  'output via port {}'
+                  .format(connection.dpid, pkt.ethernet.LLDP_TYPE, pkt.ETHERNET.LLDP_MULTICAST, of.OFPP_CONTROLLER))
+
+        # make sure LLDP packets are sent to the controller so we can handle it
+        match = of.ofp_match(dl_type=pkt.ethernet.LLDP_TYPE, dl_dst=pkt.ETHERNET.LLDP_MULTICAST)
+        msg = of.ofp_flow_mod()
+        msg.priority = 65000
+        msg.match = match
+        msg.actions.append(of.ofp_action_output(port=of.OFPP_CONTROLLER))
+
+        connection.send(msg)
 
 
 def launch():
