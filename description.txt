@@ -1,42 +1,38 @@
 OpenFlow exercise part B:
 
 The code for this part enhances part A by eliminating layer 2 cycles. It does that by computing a spanning tree over
-the active links of the network, edges, and neutralizing those ports which are not in the resulting tree.
+the active links of the network and neutralizing those ports which are not in the resulting tree.
 
 A. Learn the topology:
     1. This part is implemented by a dedicated class named "Discovery".
 
-
-    "Discovery" class is responsible for topology discovery. This class is implemented as a singleton.
+    The "Discovery" class is responsible for topology discovery. This class is implemented as a singleton since it
+    should be only one entity that should have a full view of the network.
 
     This class registers to pox dependencies events in order to track switches and LLDP packets. It does that in order
-    to maintain a list of active link in the network.
+    to maintain a list of active link in the network. The Discovery singleton registers to those events that while
+    specifying high priority in order to get these messages as soon as possible and BEFORE any other listener gets them.
 
-    When registered, the Discovery singleton does that while specifying high priority in order to get these messages as
-    soon as possible and before any other listener gets them.
-
-    This class notifies its listeners in case the network topology has changed. This occurs when a new link is
-    discovered or when links are removed due to long inactivity or when a switch is down.
+    This class notifies its listeners when the network topology has changed. This occurs when a new link is
+    discovered or when links are removed due to long inactivity or when a switch/port is down.
 
     2. In order to send LLDP messages to its neighbours, the Discovery class uses a single object for this task.
     This object is of "LLDPMessageBroker" type.
 
-
     "LLDPMessageBroker" class is only responsible for sending LLDP discovery packets.
 
-    This class registers to pox dependencies events in order to track switch and ports status. It does that because it
-    needs to know which ports are active so it can send its neighbouring switches LLDP discovery messages via these
-    ports. There is only one instance of this class.
+    This class registers to pox dependencies events (same as the Discovery class does) in order to track switch and
+    ports status. This allow it to track all switches' ports so it can send neighbouring switches LLDP discovery
+    messages via these ports.
 
-    When it discovers an active port, it prepares an LLDP packet for it.
-
+    This class prepares an LLDP packet for it for each discovered operational port and store it in a list.
     Using a timer, this class sends the next LLDP message to its destination - one message per interval. The class
     calculates the inter-message time in order to send LLDP messages in fixed intervals (this interval changes when
-    switches are added or removed). This way we avoid sending a burst of LLDP messages to all switches at once.
+    switches/ports are added or removed). This way we avoid sending a burst of LLDP messages to all switches at once.
 
     3. Upon switch up event, the Discovery singleton installs a special rule directing all LLDP packets to it.
-    When a LLDP packet arrives it checked. If its from an unknown switch it is considered as new link and an event
-    is fires indicating that topology has changed.
+    Every LLDP packet that arrives is checked. If its from an unknown switch it is considered as new link and an event
+    is fired indicating that topology has changed.
 
     4. After processing an LLDP packet, the handler returns EventHalt code indicating that this message should not be
     further processed by any other listener, thus, preventing from Tutorial class objects to handle LLDP messages
@@ -47,7 +43,7 @@ A. Learn the topology:
     removed and an event is fired for the listeners indicating that topology has changed. The scan is made every 3
     seconds and removes links which are inactive for 6 seconds.
 
-    When a neighboring switch goes down, all links to it a re removed and an event is fired for the listeners indicating
+    Also, when a neighboring switch goes down, all links to it a re removed and an event is fired for the listeners indicating
     that topology has changed.
 
 
@@ -55,7 +51,8 @@ B. Find a Spanning Tree:
     The discovery singleton also holds a reference to an object of type "PortAuthorizer".
 
     The "PortAuthorizer" class builds a graph of the network out of the active links maintained by the discovery
-    singleton. There is only one instance of this class.
+    singleton and is responsible for eliminating cycles in the topography by calculating a spannig tree on that graph.
+    There is only one instance of this class.
 
     This class, registers and listens to topology changed events fired by the Discovery singleton, and updates the
     network graph for each change.
@@ -64,35 +61,34 @@ B. Find a Spanning Tree:
     are switches and only the link A->B was discovered then an edge connecting between A and B will not appear in the
     graph. Only if the link B->A also exists then an edge will appear in the graph.
 
-    After the graph is re-calculated, a spanning tree for this graph is created. The spanning tree is created using
-    Kruskal's algorithm using disjoint sets and tree based union-find data structure.
+    After the graph is updated, a spanning tree for it is created. The spanning tree is created using Kruskal's
+    algorithm using disjoint sets and tree based union-find data structure.
 
     After the spanning tree is created, it is scanned and all the ports that appears in it are considered valid. Other
-    ports are considered as forbidden since they cause a loop. Ports which are not connected to switches are assumed to
-    be connected to hosts and therefore are always being considered as valid ones.
+    ports are considered as forbidden since they cause a loop. In any case, ports which are not connected to switches
+    are assumed to be connected to hosts and therefore are always being considered as valid ones.
 
     Note: Ports are ONLY considered forbidden if they CAUSE A LOOP. In any other case they are considered valid.
-    For example, if a links' ports are considered valid and suddenly the link goes down, the ports will are still
-    considered as valid since there is not way they cause a loop (no link).
+    For example, if a links' ports are considered valid and suddenly the link goes down, the ports are still considered
+    as valid since there is not way they cause a loop (no link).
 
 
 C. Change your switch behavior to avoid sending on forbidden links:
-    - If PortAuthorizer object, after scanning the spanning tree, finds that a port is found to be forbidden,
-    then it send switch modification message to uninstall all flows directing traffic to that port (these flows are
-    not valid anymore).
+    - If PortAuthorizer object, after scanning the spanning tree, finds that a port is forbidden, then it send switch
+    modification message to uninstall all flows directing traffic to that port (these flows are not valid anymore).
 
-    -  If PortAuthorizer object, after scanning the spanning tree, finds that a port is found to be forbidden, then it
-    sends a port modification message turning off its flooding capabilities so it want participate in any flood
-    commands. Otherwise, the flood capability of the port is turned on.
+    -  If PortAuthorizer object, after scanning the spanning tree, finds that a port is forbidden, then it sends a port
+    modification message turning off its flooding capabilities so it want participate in any flood commands. Otherwise,
+    the flood capability of the port is turned on.
 
     In order to minimize port modification messages in the system, the current state is maintained in memory and only
     a real change in the validity status of the port will trigger such a port configuration change message.
 
     - The PortAuthorizer object is responsible for notifying all its listeners (Tutorial objects) when port status
-    validity has changed. Upon receiving this event, any Tutorial object which registered as listener, process it.
+    validity has changed. Upon receiving this event, any Tutorial object, which registered as listener, process it.
 
-    If the port is considered as forbidden and invalid then the Tutorial objects delete all sources coming from this
-    port from their in-memory mapping.
+    If the port is considered as forbidden and invalid then the Tutorial objects deletes all sources coming from this
+    port from their in-memory learnt mapping.
 
 
 D. objects interaction scheme:
