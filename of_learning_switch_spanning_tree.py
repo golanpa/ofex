@@ -301,6 +301,11 @@ class LLDPMessageBroker(object):
 
 
 class PortAuthorizer(object):
+    """
+    builds a graph of the network out of the active links maintained by the discovery
+    singleton and is responsible for eliminating cycles in the topography by calculating a spannig tree on that graph.
+    """
+
     class Vertex(object):
         def __init__(self, label):
             self.label = label
@@ -488,6 +493,10 @@ class PortAuthorizer(object):
 
 
 class Discovery(object):
+    """
+    The "Discovery" class is responsible for topology discovery. This class is implemented as a singleton since it
+    should be only one entity that should have a full view of the network.
+    """
     __metaclass__ = SingletonType
 
     LINK_TIMEOUT = 6                 # number of second before link is considered as invalid
