@@ -40,7 +40,6 @@ class Tutorial(object):
         if authorized:
             # port is authorized
             self._unauthorized_ports.pop(port_no, None)
-
         else:
             # port is not authorized any more
             self._unauthorized_ports[port_no] = None
@@ -247,7 +246,6 @@ class LLDPMessageBroker(object):
 
         self._remove_port(dpid, port_num, set_timer=False)
 
-
         lldpPacket = self._create_lldp_packet(dpid, port_num, port_addr)
         self._neighbours_queue.append(LLDPMessageBroker.LLDPRawMessage(dpid, port_num, lldpPacket))
 
@@ -442,11 +440,12 @@ class PortAuthorizer(object):
                 if p.port_no >= of.OFPP_MAX:
                     continue
 
-                is_port_valid = p.port_no in switch_ports_in_spt
+                is_port_valid_for_flood = is_port_valid = p.port_no in switch_ports_in_spt
 
                 #we always enable flooding for ports that are connected to hosts
-                if not is_port_valid and self._is_port_not_connected_to_switch(active_links, src_switch, p.port_no):
-                    is_port_valid = True
+                if not is_port_valid_for_flood and \
+                        self._is_port_not_connected_to_switch(active_links, src_switch, p.port_no):
+                    is_port_valid_for_flood = True
 
                 # make modification to port only if state was changed
                 if self._former_port_valid_status[src_switch][p.port_no] != is_port_valid:
@@ -457,19 +456,21 @@ class PortAuthorizer(object):
                     else:
                         log.debug('Port disabled by spanning tree: dpid={}, port={}'.format(src_switch, p.port_no))
 
-                    # send port modification message to switch configuring its flood flag
-                    config = 0 if is_port_valid else of.OFPPC_NO_FLOOD
-
-                    msg = of.ofp_port_mod(port_no=p.port_no, hw_addr=p.hw_addr,
-                                          mask=of.OFPPC_NO_FLOOD, config=config)
-                    con.send(msg)
-
-                    if not is_port_valid:
-                        log.debug('Un-installing flow containing invalid spt port:: dpid={}, match={{ out_port:{} }} delete'
-                                  .format(src_switch, p.port_no))
+                        log.debug('Un-installing flows containing disabled port: dpid={}, match={{ out_port:{} }}'
+                                  ' delete'.format(src_switch, p.port_no))
 
                         msg = of.ofp_flow_mod(command=of.OFPFC_DELETE, out_port=p.port_no)
                         con.send(msg)
+
+                    if is_port_valid_for_flood:
+                        log.debug('flooding enabled for port: dpid={}, port={}'.format(src_switch, p.port_no))
+                    else:
+                        log.debug('flooding disabled for port: dpid={}, port={}'.format(src_switch, p.port_no))
+
+                    # send port modification message to switch configuring its flood flag
+                    config = 0 if is_port_valid_for_flood else of.OFPPC_NO_FLOOD
+                    msg = of.ofp_port_mod(port_no=p.port_no, hw_addr=p.hw_addr, mask=of.OFPPC_NO_FLOOD, config=config)
+                    con.send(msg)
 
                     # notify all listeners (e.g: Tutorial objects) that port authorization has changed
                     for listener in self._listeners[src_switch]:
